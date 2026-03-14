@@ -18,17 +18,15 @@
     select, input { font-family: inherit; }
     .week-header { cursor: pointer; user-select: none; }
     .week-header:hover { filter: brightness(0.97); }
-    .day-row input { background: transparent; border: none; border-bottom: 1px solid #e0e0e0; border-radius: 0; padding: 2px 4px; width: 58px; text-align: right; font-size: 11px; font-family: inherit; color: #1a1a2e; outline: none; }
+    .day-row input { background: transparent; border: none; border-bottom: 1px solid #e0e0e0; border-radius: 0; padding: 2px 4px; text-align: right; font-size: 11px; font-family: inherit; color: #1a1a2e; outline: none; }
     .day-row input:focus { border-bottom-color: #1a1a2e; }
-    .surplus { color: #43a047; }
-    .deficit-color { color: #e53935; }
-    .neutral { color: #888; }
+    .override-input { background: #fffde7 !important; }
   </style>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useMemo, useEffect, useRef, useCallback } = React;
+    const { useState, useMemo, useEffect, useRef } = React;
 
     const SUPABASE_URL = "https://qkzwhjdqyrtuuwwieftj.supabase.co";
     const SUPABASE_KEY = "sb_publishable_OLlLCMvJgE4IjCnPlPKJSQ_F5dJ-eYo";
@@ -62,15 +60,46 @@
       maintenance: { bg: "#e3f2fd", border: "#64b5f6", text: "#1565c0", rowBg: "#f0f6fd" },
     };
 
-    const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
     const MACROS = ["protein","carbs","fat","fiber"];
-    const MACRO_LABELS = { protein: "Protein", carbs: "Carbs", fat: "Fat", fiber: "Fiber" };
-    const MACRO_KCAL = { protein: 4, carbs: 4, fat: 9, fiber: 0 };
+    const MACRO_LABELS = { protein:"Protein", carbs:"Carbs", fat:"Fat", fiber:"Fiber" };
+    const MACRO_KCAL   = { protein:4, carbs:4, fat:9, fiber:0 };
 
-    function calcKcal(m) { return (m || {protein:0,carbs:0,fat:0,fiber:0}) && Object.entries(MACRO_KCAL).reduce((s,[k,v]) => s + (parseFloat(m[k])||0)*v, 0); }
-    function phaseKcal(p) { return calcKcal(p.macros); }
-    function phaseDeficit(p) { return (parseFloat(p.maintenance)||0) - phaseKcal(p); }
-    function phaseLossPerWeek(p) { return phaseDeficit(p) * 7 / 7700; }
+    function calcKcal(m) {
+      if (!m) return 0;
+      return Object.entries(MACRO_KCAL).reduce((s,[k,v]) => s + (parseFloat(m[k])||0)*v, 0);
+    }
+
+    // Formula: given maintenance kcal, loss/week, and phase weight → compute protein/fat/carbs
+    // deficit = lossPerWeek * 7700 / 7  (daily)
+    // intake  = maintenance - deficit
+    // protein = phaseWeight * 2.2
+    // fat     = intake * 0.25 / 9
+    // carbs   = (intake - protein*4 - fat*9) / 4
+    function computeMacros(maintenance, lossPerWeek, phaseWeight) {
+      const maint  = parseFloat(maintenance) || 0;
+      const lpw    = parseFloat(lossPerWeek) || 0;
+      const weight = parseFloat(phaseWeight) || 0;
+      const dailyDeficit = lpw * 7700 / 7;
+      const intake = maint - dailyDeficit;
+      const protein = Math.round(weight * 2.2);
+      const fat     = Math.round(intake * 0.25 / 9);
+      const carbKcal = intake - protein * 4 - fat * 9;
+      const carbs   = Math.max(0, Math.round(carbKcal / 4));
+      return { protein, carbs, fat };
+    }
+
+    function effectiveMacros(phase) {
+      // Use overrides where set, formula elsewhere
+      const formula = computeMacros(phase.maintenance, phase.lossPerWeek, phase.phaseWeight);
+      return {
+        protein: phase.overrides?.protein !== undefined ? phase.overrides.protein : formula.protein,
+        carbs:   phase.overrides?.carbs   !== undefined ? phase.overrides.carbs   : formula.carbs,
+        fat:     phase.overrides?.fat     !== undefined ? phase.overrides.fat     : formula.fat,
+        fiber:   phase.overrides?.fiber   !== undefined ? phase.overrides.fiber   : (phase.fiber || 25),
+      };
+    }
+
+    function phaseKcal(phase) { return calcKcal(effectiveMacros(phase)); }
 
     function getMonday(date) {
       const d = new Date(date);
@@ -87,55 +116,109 @@
     function dateKey(d) { return d.toISOString().slice(0,10); }
 
     const DEFAULT_PHASES = [
-      { id: 1, type: "deficit",     macros: { protein:175, carbs:106, fat:42, fiber:25 }, maintenance: 2200, weeks: 6, label: "Cut 1" },
-      { id: 2, type: "maintenance", macros: { protein:175, carbs:175, fat:65, fiber:30 }, maintenance: 2200, weeks: 6, label: "Maintenance 1" },
-      { id: 3, type: "deficit",     macros: { protein:175, carbs:106, fat:42, fiber:25 }, maintenance: 2200, weeks: 6, label: "Cut 2" },
+      { id:1, type:"deficit",     label:"Cut 1",         weeks:6, maintenance:2200, lossPerWeek:0.75, phaseWeight:79, overrides:{}, fiber:25 },
+      { id:2, type:"maintenance", label:"Maintenance 1", weeks:6, maintenance:2200, lossPerWeek:0,    phaseWeight:74, overrides:{}, fiber:30 },
+      { id:3, type:"deficit",     label:"Cut 2",         weeks:6, maintenance:2200, lossPerWeek:0.75, phaseWeight:74, overrides:{}, fiber:25 },
     ];
 
-    // ── Field style ──
     const fs = { border:"1px solid #ccc", borderRadius:4, padding:"4px 8px", fontSize:12, fontFamily:"inherit" };
 
-    // ── Phase editor form ──
+    // ── Phase form ──
     function PhaseForm({ form, setForm, onSave, onCancel, color }) {
-      const kcal = calcKcal(form.macros||{});
-      const deficit = (parseFloat(form.maintenance)||0) - kcal;
-      const lossPerWeek = deficit * 7 / 7700;
+      const formula  = computeMacros(form.maintenance, form.lossPerWeek, form.phaseWeight);
+      const macros   = effectiveMacros(form);
+      const kcal     = calcKcal(macros);
+      const dailyDef = (parseFloat(form.lossPerWeek)||0) * 7700 / 7;
+      const intake   = (parseFloat(form.maintenance)||0) - dailyDef;
+
+      function setOverride(m, val) {
+        const v = val === "" ? undefined : parseFloat(val);
+        const ov = { ...(form.overrides||{}) };
+        if (v === undefined || isNaN(v)) delete ov[m]; else ov[m] = v;
+        setForm(f => ({ ...f, overrides: ov }));
+      }
+
+      function clearOverride(m) {
+        const ov = { ...(form.overrides||{}) };
+        delete ov[m];
+        setForm(f => ({ ...f, overrides: ov }));
+      }
+
+      const isOverridden = m => (form.overrides||{})[m] !== undefined;
+
       return (
-        <div style={{ background: color.bg, border:`1px solid ${color.border}`, borderRadius:6, padding:"12px 14px" }}>
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
+        <div style={{ background:color.bg||"white", border:`1px solid ${color.border||"#ddd"}`, borderRadius:6, padding:"14px 16px" }}>
+          {/* Row 1: basic fields */}
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"flex-end", marginBottom:12 }}>
             <div>
               <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Label</div>
-              <input value={form.label||""} onChange={e => setForm(f=>({...f,label:e.target.value}))} style={{...fs,width:100}} />
+              <input value={form.label||""} onChange={e=>setForm(f=>({...f,label:e.target.value}))} style={{...fs,width:110}} />
             </div>
             <div>
               <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Type</div>
-              <select value={form.type} onChange={e => setForm(f=>({...f,type:e.target.value}))} style={fs}>
+              <select value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))} style={fs}>
                 <option value="deficit">Deficit</option>
                 <option value="maintenance">Maintenance</option>
               </select>
             </div>
             <div>
               <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Weeks</div>
-              <input type="number" value={form.weeks} onChange={e => setForm(f=>({...f,weeks:e.target.value}))} style={{...fs,width:52}} />
+              <input type="number" value={form.weeks||""} onChange={e=>setForm(f=>({...f,weeks:e.target.value}))} style={{...fs,width:52}} />
+            </div>
+            <div>
+              <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Phase Start Weight (kg)</div>
+              <input type="number" step="0.1" value={form.phaseWeight||""} onChange={e=>setForm(f=>({...f,phaseWeight:e.target.value}))} style={{...fs,width:80}} />
             </div>
             <div>
               <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Maintenance kcal</div>
-              <input type="number" value={form.maintenance||""} onChange={e => setForm(f=>({...f,maintenance:e.target.value}))} style={{...fs,width:80}} />
+              <input type="number" value={form.maintenance||""} onChange={e=>setForm(f=>({...f,maintenance:e.target.value}))} style={{...fs,width:80}} />
             </div>
-            <div style={{ width:1, background:"#ccc", alignSelf:"stretch", margin:"0 4px" }} />
-            {MACROS.map(m => (
-              <div key={m}>
-                <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>{MACRO_LABELS[m]} (g)</div>
-                <input type="number" value={(form.macros||{})[m]||""} onChange={e => setForm(f=>({...f,macros:{...(f.macros||{}), [m]:e.target.value}}))} style={{...fs,width:60}} />
-              </div>
-            ))}
-            <div style={{ fontSize:11, color:"#555", alignSelf:"flex-end", paddingBottom:6, minWidth:160 }}>
-              <span style={{ color:"#1a1a2e", fontWeight:500 }}>{kcal} kcal</span>
-              {" · "}<span style={{ color: deficit>=0?"#43a047":"#e53935" }}>{deficit>=0?"+":""}{deficit.toFixed(0)} deficit</span>
-              {" · "}<span style={{ color: lossPerWeek>=0?"#43a047":"#e53935" }}>{lossPerWeek>=0?"-":"+"}{ Math.abs(lossPerWeek).toFixed(2)}kg/w</span>
+            <div>
+              <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Loss / week (kg)</div>
+              <input type="number" step="0.05" value={form.lossPerWeek||""} onChange={e=>setForm(f=>({...f,lossPerWeek:e.target.value}))} style={{...fs,width:70}} />
+            </div>
+            {/* Calculated summary */}
+            <div style={{ fontSize:11, color:"#555", alignSelf:"flex-end", paddingBottom:6 }}>
+              <span style={{ color:"#1a1a2e", fontWeight:500 }}>{Math.round(intake)} kcal/day</span>
+              <span style={{ color:"#888" }}> · {Math.round(dailyDef)} kcal deficit</span>
             </div>
           </div>
-          <div style={{ display:"flex", gap:6, marginTop:10 }}>
+
+          {/* Row 2: macros (formula-driven, overrideable) */}
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"flex-end", padding:"10px 12px", background:"rgba(0,0,0,0.03)", borderRadius:4, marginBottom:10 }}>
+            <div style={{ fontSize:10, color:"#888", alignSelf:"center", marginRight:4 }}>Macros (g/day)</div>
+            {["protein","carbs","fat"].map(m => {
+              const ov = isOverridden(m);
+              return (
+                <div key={m} style={{ position:"relative" }}>
+                  <div style={{ fontSize:9, color: ov?"#f57c00":"#666", marginBottom:2 }}>
+                    {MACRO_LABELS[m]}{ov?" (override)":""}
+                    {ov && <span onClick={()=>clearOverride(m)} style={{ cursor:"pointer", marginLeft:4, color:"#e53935", fontSize:9 }}>✕</span>}
+                  </div>
+                  <input type="number" step="1"
+                    value={ov ? (form.overrides||{})[m] : formula[m]}
+                    onChange={e => setOverride(m, e.target.value)}
+                    style={{...fs, width:65, background: ov?"#fffde7":"white", borderColor: ov?"#f9a825":"#ccc"}} />
+                  {!ov && <div style={{ fontSize:8, color:"#aaa", marginTop:1 }}>auto</div>}
+                </div>
+              );
+            })}
+            {/* Fiber always manual */}
+            <div>
+              <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Fiber</div>
+              <input type="number" step="1" value={form.fiber||25}
+                onChange={e=>setForm(f=>({...f,fiber:parseFloat(e.target.value)||0}))}
+                style={{...fs,width:55}} />
+            </div>
+            <div style={{ fontSize:11, color:"#333", alignSelf:"flex-end", paddingBottom:6, fontWeight:500 }}>
+              = {kcal} kcal
+              {" "}<span style={{ fontSize:10, color:"#888" }}>
+                ({macros.protein}p / {macros.carbs}c / {macros.fat}f / {macros.fiber||form.fiber||25}fb)
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display:"flex", gap:6 }}>
             <button className="btn" onClick={onSave} style={{ background:"#1a1a2e", color:"white" }}>Save</button>
             <button className="btn" onClick={onCancel} style={{ background:"#eee", color:"#333" }}>Cancel</button>
           </div>
@@ -152,32 +235,29 @@
 
       function setMacro(m, v) {
         const val = v === "" ? undefined : parseFloat(v);
-        const newMacros = {...macros};
-        if (val === undefined || isNaN(val)) delete newMacros[m]; else newMacros[m] = val;
-        onChange({ ...dayData, macros: newMacros });
+        const nm = {...macros};
+        if (val === undefined || isNaN(val)) delete nm[m]; else nm[m] = val;
+        onChange({ ...dayData, macros: nm });
       }
       function setWeight(v) {
         const val = v === "" ? undefined : parseFloat(v);
-        if (val === undefined || isNaN(val)) { const nd = {...dayData}; delete nd.weight; onChange(nd); }
+        if (val === undefined || isNaN(val)) { const nd={...dayData}; delete nd.weight; onChange(nd); }
         else onChange({ ...dayData, weight: val });
       }
 
-      const hasAny = Object.keys(macros).length > 0 || weight !== undefined;
       const kcalDiff = kcal > 0 ? kcal - targetKcal : null;
 
       return (
-        <div className="day-row" style={{ display:"grid", gridTemplateColumns:"90px 70px 58px 58px 58px 58px 70px 80px", gap:0, padding:"5px 12px 5px 36px", borderBottom:"1px solid #f5f5f5", alignItems:"center", background: hasAny?"rgba(255,255,255,0.8)":"rgba(250,250,250,0.5)" }}>
+        <div className="day-row" style={{ display:"grid", gridTemplateColumns:"96px 64px 60px 60px 60px 60px 80px", gap:0, padding:"5px 12px 5px 36px", borderBottom:"1px solid #f5f5f5", alignItems:"center" }}>
           <span style={{ fontSize:11, color:"#888" }}>{fmtFull(date)}</span>
           <span style={{ textAlign:"right", paddingRight:8 }}>
             <input type="number" step="0.1" placeholder="—" value={weight !== undefined ? weight : ""}
-              onChange={e => setWeight(e.target.value)}
-              style={{ width:58, textAlign:"right", border:"none", borderBottom:"1px solid #e0e0e0", padding:"2px 4px", fontSize:11, fontFamily:"inherit", background:"transparent", outline:"none", color:"#1a1a2e" }} />
+              onChange={e=>setWeight(e.target.value)} style={{ width:56 }} />
           </span>
           {MACROS.map(m => (
             <span key={m} style={{ textAlign:"right", paddingRight:4 }}>
               <input type="number" step="1" placeholder="—" value={macros[m] !== undefined ? macros[m] : ""}
-                onChange={e => setMacro(m, e.target.value)}
-                style={{ width:54, textAlign:"right", border:"none", borderBottom:"1px solid #e0e0e0", padding:"2px 4px", fontSize:11, fontFamily:"inherit", background:"transparent", outline:"none", color:"#1a1a2e" }} />
+                onChange={e=>setMacro(m, e.target.value)} style={{ width:54 }} />
             </span>
           ))}
           <span style={{ textAlign:"right", fontSize:11, paddingRight:4 }}>
@@ -185,8 +265,8 @@
               <span>
                 <span style={{ color:"#333" }}>{kcal}</span>
                 {kcalDiff !== null && (
-                  <span style={{ fontSize:10, color: kcalDiff>50?"#e53935":kcalDiff<-50?"#43a047":"#888", marginLeft:3 }}>
-                    {kcalDiff>0?"+":""}{kcalDiff.toFixed(0)}
+                  <span style={{ fontSize:10, marginLeft:3, color: kcalDiff>50?"#e53935":kcalDiff<-50?"#43a047":"#888" }}>
+                    {kcalDiff>0?"+":""}{Math.round(kcalDiff)}
                   </span>
                 )}
               </span>
@@ -197,55 +277,51 @@
     }
 
     // ── Week row ──
-    function WeekRow({ weekIdx, globalWeek, weekInPhase, weekStart, phase, projStart, projEnd, dayLogs, onDayChange, targetWeight }) {
+    function WeekRow({ weekInPhase, weekStart, phase, projStart, projEnd, dayLogs, onDayChange, targetWeight }) {
       const [expanded, setExpanded] = useState(false);
       const c = COLORS[phase.type];
-      const phaseTargets = phase.macros || {};
+      const phaseTargets = effectiveMacros(phase);
       const targetKcal = calcKcal(phaseTargets);
 
-      // Aggregate from days
       const days = Array.from({length:7}, (_,i) => addDays(weekStart, i));
-      const weights = days.map(d => { const dd = dayLogs[dateKey(d)]; return dd && dd.weight !== undefined ? dd.weight : null; }).filter(w => w !== null);
+      const weights = days.map(d => { const dd = dayLogs[dateKey(d)]; return dd?.weight !== undefined ? dd.weight : null; }).filter(w => w !== null);
       const avgWeight = weights.length > 0 ? weights.reduce((a,b)=>a+b,0)/weights.length : null;
 
       const weekMacroTotals = MACROS.reduce((acc,m) => {
-        acc[m] = days.reduce((s,d) => { const dd = dayLogs[dateKey(d)]; return s + (dd && dd.macros && dd.macros[m] ? parseFloat(dd.macros[m]) : 0); }, 0);
+        acc[m] = days.reduce((s,d) => { const dd = dayLogs[dateKey(d)]; return s + (dd?.macros?.[m] ? parseFloat(dd.macros[m]) : 0); }, 0);
         return acc;
       }, {});
       const weekKcal = calcKcal(weekMacroTotals);
-      const loggedDays = days.filter(d => { const dd = dayLogs[dateKey(d)]; return dd && (Object.keys(dd.macros||{}).length>0 || dd.weight !== undefined); }).length;
 
       const variance = avgWeight !== null ? avgWeight - projEnd : null;
       const hitTarget = projEnd <= targetWeight;
 
       return (
         <div>
-          {/* Week summary row */}
-          <div className="week-header" onClick={() => setExpanded(e=>!e)}
-            style={{ display:"grid", gridTemplateColumns:"158px 50px 70px 70px 70px 80px", padding:"7px 12px", borderBottom: expanded?"none":"1px solid #f0f0f0", background: expanded ? c.rowBg : (avgWeight !== null ? "rgba(129,199,132,0.06)" : "white"), alignItems:"center" }}>
+          <div className="week-header" onClick={()=>setExpanded(e=>!e)}
+            style={{ display:"grid", gridTemplateColumns:"158px 50px 70px 70px 70px 80px", padding:"7px 12px", borderBottom: expanded?"none":"1px solid #f0f0f0", background: expanded?c.rowBg:(avgWeight!==null?"rgba(129,199,132,0.06)":"white"), alignItems:"center" }}>
             <span style={{ fontSize:11, color:"#444", display:"flex", alignItems:"center", gap:6 }}>
-              <span style={{ fontSize:10, color:"#bbb", transition:"transform 0.15s", display:"inline-block", transform: expanded?"rotate(90deg)":"rotate(0deg)" }}>▶</span>
+              <span style={{ fontSize:10, color:"#bbb", display:"inline-block", transition:"transform 0.15s", transform:expanded?"rotate(90deg)":"rotate(0deg)" }}>▶</span>
               {fmtRange(weekStart)}
             </span>
             <span style={{ fontSize:11, color:"#999" }}>W{weekInPhase}</span>
             <span style={{ fontSize:11, textAlign:"right", color:"#888" }}>{projStart.toFixed(1)}</span>
-            <span style={{ fontSize:11, textAlign:"right", color: hitTarget?"#43a047":"#333", fontWeight: hitTarget?600:400 }}>
+            <span style={{ fontSize:11, textAlign:"right", color:hitTarget?"#43a047":"#333", fontWeight:hitTarget?600:400 }}>
               {projEnd.toFixed(1)}{hitTarget?" 🎯":""}
             </span>
-            <span style={{ fontSize:11, textAlign:"right", color: avgWeight!==null?"#1a1a2e":"#ccc" }}>
-              {avgWeight !== null ? avgWeight.toFixed(1) : "—"}
-              {weights.length > 0 && weights.length < 7 && <span style={{ fontSize:9, color:"#aaa", marginLeft:2 }}>({weights.length}d)</span>}
+            <span style={{ fontSize:11, textAlign:"right", color:avgWeight!==null?"#1a1a2e":"#ccc" }}>
+              {avgWeight!==null ? avgWeight.toFixed(1) : "—"}
+              {weights.length>0 && weights.length<7 && <span style={{ fontSize:9, color:"#aaa", marginLeft:2 }}>({weights.length}d)</span>}
             </span>
-            <span style={{ fontSize:11, textAlign:"right", color: variance===null?"#ccc":variance>0.2?"#e53935":variance<-0.2?"#43a047":"#888" }}>
-              {variance===null ? "—" : (variance>0?"+":"")+variance.toFixed(1)+" kg"}
+            <span style={{ fontSize:11, textAlign:"right", color:variance===null?"#ccc":variance>0.2?"#e53935":variance<-0.2?"#43a047":"#888" }}>
+              {variance===null?"—":(variance>0?"+":"")+variance.toFixed(1)+" kg"}
             </span>
           </div>
 
-          {/* Expanded: day rows */}
           {expanded && (
-            <div style={{ background: c.rowBg, borderBottom:"1px solid #e8e8e8" }}>
+            <div style={{ background:c.rowBg, borderBottom:"1px solid #e8e8e8" }}>
               {/* Day header */}
-              <div style={{ display:"grid", gridTemplateColumns:"90px 70px 58px 58px 58px 58px 70px 80px", padding:"4px 12px 4px 36px", fontSize:9, color:"#aaa", letterSpacing:1.2, textTransform:"uppercase", borderBottom:"1px solid #ececec" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"96px 64px 60px 60px 60px 60px 80px", padding:"4px 12px 4px 36px", fontSize:9, color:"#aaa", letterSpacing:1.2, textTransform:"uppercase", borderBottom:"1px solid #ececec" }}>
                 <span>Day</span>
                 <span style={{ textAlign:"right", paddingRight:8 }}>Weight</span>
                 {MACROS.map(m => <span key={m} style={{ textAlign:"right", paddingRight:4 }}>{MACRO_LABELS[m]}</span>)}
@@ -257,38 +333,40 @@
                   onChange={data => onDayChange(dateKey(d), data)} />
               ))}
               {/* Week totals */}
-              <div style={{ display:"grid", gridTemplateColumns:"90px 70px 58px 58px 58px 58px 70px 80px", padding:"6px 12px 6px 36px", borderTop:"1px solid #ddd", alignItems:"center", background:"rgba(0,0,0,0.03)" }}>
-                <span style={{ fontSize:10, color:"#666", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Week total</span>
+              <div style={{ display:"grid", gridTemplateColumns:"96px 64px 60px 60px 60px 60px 80px", padding:"6px 12px 6px 36px", borderTop:"1px solid #ddd", alignItems:"center", background:"rgba(0,0,0,0.03)" }}>
+                <span style={{ fontSize:10, color:"#666", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Week Σ</span>
                 <span style={{ textAlign:"right", paddingRight:8, fontSize:11, color:"#555" }}>
-                  {avgWeight !== null ? `~${avgWeight.toFixed(1)} avg` : "—"}
+                  {avgWeight!==null ? `~${avgWeight.toFixed(1)}` : "—"}
                 </span>
                 {MACROS.map(m => {
                   const total = weekMacroTotals[m];
                   const target = (phaseTargets[m]||0)*7;
-                  const diff = total > 0 ? total - target : null;
+                  const diff = total>0 ? total-target : null;
                   return (
                     <span key={m} style={{ textAlign:"right", paddingRight:4, fontSize:11 }}>
-                      {total > 0 ? (
+                      {total>0 ? (
                         <span>
-                          <span style={{ color:"#333" }}>{total.toFixed(0)}</span>
-                          {diff !== null && <span style={{ fontSize:9, color: diff>10?"#e53935":diff<-10?"#43a047":"#888", marginLeft:2 }}>{diff>0?"+":""}{diff.toFixed(0)}</span>}
+                          <span style={{ color:"#333" }}>{Math.round(total)}</span>
+                          {diff!==null && <span style={{ fontSize:9, marginLeft:2, color:diff>10?"#e53935":diff<-10?"#43a047":"#888" }}>{diff>0?"+":""}{Math.round(diff)}</span>}
                         </span>
                       ) : <span style={{ color:"#ccc" }}>—</span>}
                     </span>
                   );
                 })}
                 <span style={{ textAlign:"right", paddingRight:4, fontSize:11 }}>
-                  {weekKcal > 0 ? (
+                  {weekKcal>0 ? (
                     <span>
-                      <span style={{ color:"#333", fontWeight:500 }}>{weekKcal.toFixed(0)}</span>
-                      {targetKcal > 0 && <span style={{ fontSize:9, color: (weekKcal-targetKcal*7)>100?"#e53935":(weekKcal-targetKcal*7)<-100?"#43a047":"#888", marginLeft:2 }}>{weekKcal-targetKcal*7>0?"+":""}{(weekKcal-targetKcal*7).toFixed(0)}</span>}
+                      <span style={{ color:"#333", fontWeight:500 }}>{Math.round(weekKcal)}</span>
+                      {targetKcal>0 && <span style={{ fontSize:9, marginLeft:2, color:(weekKcal-targetKcal*7)>100?"#e53935":(weekKcal-targetKcal*7)<-100?"#43a047":"#888" }}>
+                        {weekKcal-targetKcal*7>0?"+":""}{Math.round(weekKcal-targetKcal*7)}
+                      </span>}
                     </span>
                   ) : <span style={{ color:"#ccc" }}>—</span>}
                 </span>
               </div>
-              {/* Phase targets reminder */}
+              {/* Target reminder */}
               <div style={{ padding:"4px 12px 6px 36px", fontSize:10, color:"#aaa" }}>
-                Target: {MACROS.map(m => `${phaseTargets[m]||0}g ${m}`).join(" · ")} · {targetKcal} kcal/day
+                Target: {MACROS.map(m=>`${phaseTargets[m]||0}g ${m}`).join(" · ")} · {targetKcal} kcal/day
               </div>
             </div>
           )}
@@ -303,11 +381,11 @@
       const [startWeight,  setStartWeight]  = useState(79.0);
       const [targetWeight, setTargetWeight] = useState(70.0);
       const [phases,       setPhases]       = useState(DEFAULT_PHASES);
-      const [dayLogs,      setDayLogs]      = useState({});  // { "2026-03-16": { weight, macros:{} } }
+      const [dayLogs,      setDayLogs]      = useState({});
       const [nextId,       setNextId]       = useState(10);
       const [editingPhase, setEditingPhase] = useState(null);
       const [editForm,     setEditForm]     = useState({});
-      const [newPhase,     setNewPhase]     = useState({ type:"deficit", macros:{protein:175,carbs:106,fat:42,fiber:25}, maintenance:2200, weeks:6, label:"" });
+      const [newPhase,     setNewPhase]     = useState({ type:"deficit", label:"", weeks:6, maintenance:2200, lossPerWeek:0.75, phaseWeight:79, overrides:{}, fiber:25 });
       const [showAdd,      setShowAdd]      = useState(false);
       const [saveStatus,   setSaveStatus]   = useState("saved");
       const [dragIdx,      setDragIdx]      = useState(null);
@@ -354,66 +432,65 @@
         return r;
       }, [phases]);
 
-      // Project weights using averaged daily weights where available
       const projectedWeights = useMemo(() => {
         const r = [];
         for (let i = 0; i < weeks.length; i++) {
           const w = weeks[i];
           const weekStart = addWeeks(startDate, i);
           const days = Array.from({length:7}, (_,d) => addDays(weekStart, d));
-          const weights = days.map(d => { const dd = dayLogs[dateKey(d)]; return dd && dd.weight !== undefined ? dd.weight : null; }).filter(x => x !== null);
-          const avgW = weights.length > 0 ? weights.reduce((a,b)=>a+b,0)/weights.length : null;
-          const lossPerWeek = phaseLossPerWeek(w.phase);
-          const prev = i === 0 ? startWeight : r[i-1].end;
-          r.push({ start: prev, end: avgW !== null ? avgW : prev - lossPerWeek });
+          const weights = days.map(d => { const dd = dayLogs[dateKey(d)]; return dd?.weight !== undefined ? dd.weight : null; }).filter(x => x!==null);
+          const avgW = weights.length>0 ? weights.reduce((a,b)=>a+b,0)/weights.length : null;
+          const lpw = parseFloat(w.phase.lossPerWeek)||0;
+          const prev = i===0 ? startWeight : r[i-1].end;
+          r.push({ start:prev, end: avgW!==null ? avgW : prev - lpw });
         }
         return r;
       }, [weeks, dayLogs, startDate, startWeight]);
 
-      function handleDayChange(weekIdx, dateStr, data) {
+      function handleDayChange(dateStr, data) {
         const nl = { ...dayLogs, [dateStr]: data };
-        if (!data.weight && (!data.macros || Object.keys(data.macros).length === 0)) delete nl[dateStr];
-        setDayLogs(nl); scheduleSave({ dayLogs: nl });
+        if (!data.weight && (!data.macros || Object.keys(data.macros).length===0)) delete nl[dateStr];
+        setDayLogs(nl); scheduleSave({ dayLogs:nl });
       }
 
       function saveEdit() {
-        const updated = phases.map(p => p.id === editingPhase
+        const updated = phases.map(p => p.id===editingPhase
           ? { ...editForm, id:p.id, weeks:parseInt(editForm.weeks), maintenance:parseFloat(editForm.maintenance),
-              macros: Object.fromEntries(MACROS.map(m => [m, parseFloat((editForm.macros||{})[m])||0])) }
+              lossPerWeek:parseFloat(editForm.lossPerWeek)||0, phaseWeight:parseFloat(editForm.phaseWeight)||0,
+              overrides: editForm.overrides||{}, fiber:parseFloat(editForm.fiber)||25 }
           : p);
         setEditingPhase(null); setPhases(updated); scheduleSave({ phases:updated });
       }
 
-      function delPhase(id) { const u = phases.filter(p=>p.id!==id); setPhases(u); scheduleSave({ phases:u }); }
+      function delPhase(id) { const u=phases.filter(p=>p.id!==id); setPhases(u); scheduleSave({ phases:u }); }
 
       function addPhase() {
         const id = nextId;
         const np = { ...newPhase, id, weeks:parseInt(newPhase.weeks), maintenance:parseFloat(newPhase.maintenance),
-          macros: Object.fromEntries(MACROS.map(m => [m, parseFloat((newPhase.macros||{})[m])||0])) };
+          lossPerWeek:parseFloat(newPhase.lossPerWeek)||0, phaseWeight:parseFloat(newPhase.phaseWeight)||0,
+          overrides:newPhase.overrides||{}, fiber:parseFloat(newPhase.fiber)||25 };
         const updated = [...phases, np];
-        setNewPhase({ type:"deficit", macros:{protein:175,carbs:106,fat:42,fiber:25}, maintenance:2200, weeks:6, label:"" });
+        setNewPhase({ type:"deficit", label:"", weeks:6, maintenance:2200, lossPerWeek:0.75, phaseWeight:79, overrides:{}, fiber:25 });
         setShowAdd(false); setPhases(updated); setNextId(id+1);
         scheduleSave({ phases:updated, nextId:id+1 });
       }
 
       function handleDrop(e, dropIdx) {
         e.preventDefault();
-        if (dragIdx === null || dragIdx === dropIdx) { setDragIdx(null); setDragOverIdx(null); return; }
-        const oldP = [...phases], newP = [...phases];
+        if (dragIdx===null || dragIdx===dropIdx) { setDragIdx(null); setDragOverIdx(null); return; }
+        const newP = [...phases];
         const [moved] = newP.splice(dragIdx, 1); newP.splice(dropIdx, 0, moved);
-        // dayLogs are keyed by date string so they don't need remapping
-        setDragIdx(null); setDragOverIdx(null); setPhases(newP);
-        scheduleSave({ phases:newP });
+        setDragIdx(null); setDragOverIdx(null); setPhases(newP); scheduleSave({ phases:newP });
       }
 
-      const finalWeight = projectedWeights.length > 0 ? projectedWeights[projectedWeights.length-1].end : startWeight;
+      const finalWeight = projectedWeights.length>0 ? projectedWeights[projectedWeights.length-1].end : startWeight;
       const remaining   = finalWeight - targetWeight;
 
       const phaseGroups = useMemo(() => {
         const g = []; let cur = null;
-        for (let i = 0; i < weeks.length; i++) {
+        for (let i=0; i<weeks.length; i++) {
           const w = weeks[i];
-          if (!cur || cur.phaseId !== w.phaseId) { cur = { phaseId:w.phaseId, label:w.phaseLabel, type:w.type, phase:w.phase, weeks:[] }; g.push(cur); }
+          if (!cur || cur.phaseId!==w.phaseId) { cur={ phaseId:w.phaseId, label:w.phaseLabel, type:w.type, phase:w.phase, weeks:[] }; g.push(cur); }
           cur.weeks.push({ ...w, idx:i });
         }
         return g;
@@ -474,11 +551,13 @@
               <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
                 {phases.map((phase, pi) => {
                   const c = COLORS[phase.type];
-                  const kcal = phaseKcal(phase);
-                  const lpw  = phaseLossPerWeek(phase);
-                  if (editingPhase === phase.id) return (
+                  const macros = effectiveMacros(phase);
+                  const kcal = calcKcal(macros);
+                  const lpw = parseFloat(phase.lossPerWeek)||0;
+                  const hasOverrides = Object.keys(phase.overrides||{}).length > 0;
+                  if (editingPhase===phase.id) return (
                     <PhaseForm key={phase.id} form={editForm} setForm={setEditForm} color={c}
-                      onSave={saveEdit} onCancel={() => setEditingPhase(null)} />
+                      onSave={saveEdit} onCancel={()=>setEditingPhase(null)} />
                   );
                   return (
                     <div key={phase.id} className={dragOverIdx===pi && dragIdx!==pi?"drag-over":""}
@@ -492,13 +571,16 @@
                         <span style={{ color:"#bbb", fontSize:16 }}>⠿</span>
                         <span style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:500, fontSize:13, color:c.text, minWidth:90 }}>{phase.label}</span>
                         <span style={{ fontSize:11, color:"#666" }}>{phase.weeks}w</span>
-                        <span style={{ fontSize:11, color:"#555" }}>{kcal} kcal · {MACROS.map(m=>`${phase.macros[m]||0}g ${m}`).join(", ")}</span>
-                        <span style={{ fontSize:11, color: lpw>=0?"#43a047":"#e53935" }}>
-                          {lpw>=0?"-":"+"}{Math.abs(lpw).toFixed(2)} kg/w
+                        <span style={{ fontSize:11, color:"#666" }}>~{phase.phaseWeight}kg start</span>
+                        <span style={{ fontSize:11, color:"#555" }}>{kcal} kcal/day</span>
+                        <span style={{ fontSize:11, color:"#666" }}>{macros.protein}p/{macros.carbs}c/{macros.fat}f/{macros.fiber}fb</span>
+                        <span style={{ fontSize:11, color:lpw>0?"#43a047":"#888" }}>
+                          {lpw>0?`-${lpw}`:0} kg/w
                         </span>
+                        {hasOverrides && <span style={{ fontSize:10, color:"#f57c00" }}>⚠ overrides</span>}
                       </div>
                       <div style={{ display:"flex", gap:5 }}>
-                        <button className="btn" onClick={()=>{ setEditingPhase(phase.id); setEditForm({...phase}); }} style={{ background:"#1a1a2e", color:"white" }}>Edit</button>
+                        <button className="btn" onClick={()=>{ setEditingPhase(phase.id); setEditForm({...phase, overrides:{...(phase.overrides||{})}}); }} style={{ background:"#1a1a2e", color:"white" }}>Edit</button>
                         <button className="btn" onClick={()=>delPhase(phase.id)} style={{ background:"#ffeaea", color:"#c62828" }}>Delete</button>
                       </div>
                     </div>
@@ -518,7 +600,6 @@
             {/* Weekly log */}
             <div>
               <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, letterSpacing:3, color:"#888", textTransform:"uppercase", marginBottom:10 }}>Weekly Log</div>
-              {/* Header */}
               <div style={{ display:"grid", gridTemplateColumns:"158px 50px 70px 70px 70px 80px", padding:"5px 12px", fontSize:9, color:"#999", letterSpacing:1.5, textTransform:"uppercase", borderBottom:"1px solid #e0e0e0" }}>
                 <span>Week</span><span>Wk</span>
                 <span style={{ textAlign:"right" }}>Proj. Start</span>
@@ -526,7 +607,6 @@
                 <span style={{ textAlign:"right" }}>Avg Weight</span>
                 <span style={{ textAlign:"right" }}>Variance</span>
               </div>
-
               {phaseGroups.map(group => {
                 const c = COLORS[group.type];
                 return (
@@ -538,15 +618,13 @@
                       const weekStart = addWeeks(startDate, idx);
                       return (
                         <WeekRow key={globalWeek}
-                          weekIdx={idx}
-                          globalWeek={globalWeek}
                           weekInPhase={weekInPhase}
                           weekStart={weekStart}
                           phase={group.phase}
                           projStart={projectedWeights[idx].start}
                           projEnd={projectedWeights[idx].end}
                           dayLogs={dayLogs}
-                          onDayChange={(dateStr, data) => handleDayChange(idx, dateStr, data)}
+                          onDayChange={(dateStr, data) => handleDayChange(dateStr, data)}
                           targetWeight={targetWeight}
                         />
                       );
