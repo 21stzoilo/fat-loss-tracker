@@ -12,18 +12,23 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #f8f7f4; font-family: 'DM Mono', 'Courier New', monospace; }
     input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
-    .week-row:hover { background: rgba(0,0,0,0.02) !important; }
     .btn { cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: 12px; padding: 5px 10px; transition: opacity 0.15s; }
     .btn:hover { opacity: 0.8; }
     .drag-over { outline: 2px dashed #1a1a2e; outline-offset: -2px; border-radius: 6px; }
     select, input { font-family: inherit; }
+    .week-header { cursor: pointer; user-select: none; }
+    .week-header:hover { filter: brightness(0.97); }
+    .day-row input { background: transparent; border: none; border-bottom: 1px solid #e0e0e0; border-radius: 0; padding: 2px 4px; width: 58px; text-align: right; font-size: 11px; font-family: inherit; color: #1a1a2e; outline: none; }
+    .day-row input:focus { border-bottom-color: #1a1a2e; }
+    .surplus { color: #43a047; }
+    .deficit-color { color: #e53935; }
+    .neutral { color: #888; }
   </style>
 </head>
 <body>
   <div id="root"></div>
-
   <script type="text/babel">
-    const { useState, useMemo, useEffect, useRef } = React;
+    const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
     const SUPABASE_URL = "https://qkzwhjdqyrtuuwwieftj.supabase.co";
     const SUPABASE_KEY = "sb_publishable_OLlLCMvJgE4IjCnPlPKJSQ_F5dJ-eYo";
@@ -33,69 +38,276 @@
     async function sbGet() {
       try {
         const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${ROW_ID}&select=data`, {
-          headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+          headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
         });
         if (!res.ok) return null;
         const rows = await res.json();
         return rows.length > 0 ? rows[0].data : null;
-      } catch (e) { return null; }
+      } catch { return null; }
     }
 
     async function sbSave(data) {
       try {
         const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}`, {
           method: "POST",
-          headers: {
-            "apikey": SUPABASE_KEY,
-            "Authorization": `Bearer ${SUPABASE_KEY}`,
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates"
-          },
+          headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
           body: JSON.stringify({ id: ROW_ID, data, updated_at: new Date().toISOString() })
         });
         return res.ok;
-      } catch (e) { return false; }
+      } catch { return false; }
     }
 
     const COLORS = {
-      deficit:     { bg: "#e8f5e9", border: "#81c784", text: "#2e7d32", label: "Deficit" },
-      maintenance: { bg: "#e3f2fd", border: "#64b5f6", text: "#1565c0", label: "Maintenance" },
+      deficit:     { bg: "#e8f5e9", border: "#81c784", text: "#2e7d32", rowBg: "#f1f8f1" },
+      maintenance: { bg: "#e3f2fd", border: "#64b5f6", text: "#1565c0", rowBg: "#f0f6fd" },
     };
+
+    const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    const MACROS = ["protein","carbs","fat","fiber"];
+    const MACRO_LABELS = { protein: "Protein", carbs: "Carbs", fat: "Fat", fiber: "Fiber" };
+    const MACRO_KCAL = { protein: 4, carbs: 4, fat: 9, fiber: 0 };
+
+    function calcKcal(m) { return (m || {protein:0,carbs:0,fat:0,fiber:0}) && Object.entries(MACRO_KCAL).reduce((s,[k,v]) => s + (parseFloat(m[k])||0)*v, 0); }
+    function phaseKcal(p) { return calcKcal(p.macros); }
+    function phaseDeficit(p) { return (parseFloat(p.maintenance)||0) - phaseKcal(p); }
+    function phaseLossPerWeek(p) { return phaseDeficit(p) * 7 / 7700; }
 
     function getMonday(date) {
       const d = new Date(date);
       const day = d.getDay();
       d.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
-      d.setHours(0, 0, 0, 0);
+      d.setHours(0,0,0,0);
       return d;
     }
-
-    function addWeeks(date, n) {
-      const d = new Date(date);
-      d.setDate(d.getDate() + n * 7);
-      return d;
-    }
-
-    function fmt(d) { return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short" }); }
-    function fmtRange(s) { const e = new Date(s); e.setDate(e.getDate() + 6); return `${fmt(s)} – ${fmt(e)}`; }
+    function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate()+n); return d; }
+    function addWeeks(date, n) { return addDays(date, n*7); }
+    function fmt(d) { return d.toLocaleDateString("es-AR", { day:"2-digit", month:"short" }); }
+    function fmtFull(d) { return d.toLocaleDateString("es-AR", { weekday:"short", day:"2-digit", month:"short" }); }
+    function fmtRange(s) { const e = addDays(s,6); return `${fmt(s)} – ${fmt(e)}`; }
+    function dateKey(d) { return d.toISOString().slice(0,10); }
 
     const DEFAULT_PHASES = [
-      { id: 1, type: "deficit",     kcal: 1500, lossPerWeek: 0.75, weeks: 6, label: "Cut 1" },
-      { id: 2, type: "maintenance", kcal: 2200, lossPerWeek: 0,    weeks: 6, label: "Maintenance 1" },
-      { id: 3, type: "deficit",     kcal: 1500, lossPerWeek: 0.75, weeks: 6, label: "Cut 2" },
+      { id: 1, type: "deficit",     macros: { protein:175, carbs:106, fat:42, fiber:25 }, maintenance: 2200, weeks: 6, label: "Cut 1" },
+      { id: 2, type: "maintenance", macros: { protein:175, carbs:175, fat:65, fiber:30 }, maintenance: 2200, weeks: 6, label: "Maintenance 1" },
+      { id: 3, type: "deficit",     macros: { protein:175, carbs:106, fat:42, fiber:25 }, maintenance: 2200, weeks: 6, label: "Cut 2" },
     ];
 
+    // ── Field style ──
+    const fs = { border:"1px solid #ccc", borderRadius:4, padding:"4px 8px", fontSize:12, fontFamily:"inherit" };
+
+    // ── Phase editor form ──
+    function PhaseForm({ form, setForm, onSave, onCancel, color }) {
+      const kcal = calcKcal(form.macros||{});
+      const deficit = (parseFloat(form.maintenance)||0) - kcal;
+      const lossPerWeek = deficit * 7 / 7700;
+      return (
+        <div style={{ background: color.bg, border:`1px solid ${color.border}`, borderRadius:6, padding:"12px 14px" }}>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
+            <div>
+              <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Label</div>
+              <input value={form.label||""} onChange={e => setForm(f=>({...f,label:e.target.value}))} style={{...fs,width:100}} />
+            </div>
+            <div>
+              <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Type</div>
+              <select value={form.type} onChange={e => setForm(f=>({...f,type:e.target.value}))} style={fs}>
+                <option value="deficit">Deficit</option>
+                <option value="maintenance">Maintenance</option>
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Weeks</div>
+              <input type="number" value={form.weeks} onChange={e => setForm(f=>({...f,weeks:e.target.value}))} style={{...fs,width:52}} />
+            </div>
+            <div>
+              <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>Maintenance kcal</div>
+              <input type="number" value={form.maintenance||""} onChange={e => setForm(f=>({...f,maintenance:e.target.value}))} style={{...fs,width:80}} />
+            </div>
+            <div style={{ width:1, background:"#ccc", alignSelf:"stretch", margin:"0 4px" }} />
+            {MACROS.map(m => (
+              <div key={m}>
+                <div style={{ fontSize:9, color:"#666", marginBottom:2 }}>{MACRO_LABELS[m]} (g)</div>
+                <input type="number" value={(form.macros||{})[m]||""} onChange={e => setForm(f=>({...f,macros:{...(f.macros||{}), [m]:e.target.value}}))} style={{...fs,width:60}} />
+              </div>
+            ))}
+            <div style={{ fontSize:11, color:"#555", alignSelf:"flex-end", paddingBottom:6, minWidth:160 }}>
+              <span style={{ color:"#1a1a2e", fontWeight:500 }}>{kcal} kcal</span>
+              {" · "}<span style={{ color: deficit>=0?"#43a047":"#e53935" }}>{deficit>=0?"+":""}{deficit.toFixed(0)} deficit</span>
+              {" · "}<span style={{ color: lossPerWeek>=0?"#43a047":"#e53935" }}>{lossPerWeek>=0?"-":"+"}{ Math.abs(lossPerWeek).toFixed(2)}kg/w</span>
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:6, marginTop:10 }}>
+            <button className="btn" onClick={onSave} style={{ background:"#1a1a2e", color:"white" }}>Save</button>
+            <button className="btn" onClick={onCancel} style={{ background:"#eee", color:"#333" }}>Cancel</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Day row ──
+    function DayRow({ date, phaseTargets, dayData, onChange }) {
+      const macros = dayData.macros || {};
+      const kcal = calcKcal(macros);
+      const targetKcal = calcKcal(phaseTargets);
+      const weight = dayData.weight;
+
+      function setMacro(m, v) {
+        const val = v === "" ? undefined : parseFloat(v);
+        const newMacros = {...macros};
+        if (val === undefined || isNaN(val)) delete newMacros[m]; else newMacros[m] = val;
+        onChange({ ...dayData, macros: newMacros });
+      }
+      function setWeight(v) {
+        const val = v === "" ? undefined : parseFloat(v);
+        if (val === undefined || isNaN(val)) { const nd = {...dayData}; delete nd.weight; onChange(nd); }
+        else onChange({ ...dayData, weight: val });
+      }
+
+      const hasAny = Object.keys(macros).length > 0 || weight !== undefined;
+      const kcalDiff = kcal > 0 ? kcal - targetKcal : null;
+
+      return (
+        <div className="day-row" style={{ display:"grid", gridTemplateColumns:"90px 70px 58px 58px 58px 58px 70px 80px", gap:0, padding:"5px 12px 5px 36px", borderBottom:"1px solid #f5f5f5", alignItems:"center", background: hasAny?"rgba(255,255,255,0.8)":"rgba(250,250,250,0.5)" }}>
+          <span style={{ fontSize:11, color:"#888" }}>{fmtFull(date)}</span>
+          <span style={{ textAlign:"right", paddingRight:8 }}>
+            <input type="number" step="0.1" placeholder="—" value={weight !== undefined ? weight : ""}
+              onChange={e => setWeight(e.target.value)}
+              style={{ width:58, textAlign:"right", border:"none", borderBottom:"1px solid #e0e0e0", padding:"2px 4px", fontSize:11, fontFamily:"inherit", background:"transparent", outline:"none", color:"#1a1a2e" }} />
+          </span>
+          {MACROS.map(m => (
+            <span key={m} style={{ textAlign:"right", paddingRight:4 }}>
+              <input type="number" step="1" placeholder="—" value={macros[m] !== undefined ? macros[m] : ""}
+                onChange={e => setMacro(m, e.target.value)}
+                style={{ width:54, textAlign:"right", border:"none", borderBottom:"1px solid #e0e0e0", padding:"2px 4px", fontSize:11, fontFamily:"inherit", background:"transparent", outline:"none", color:"#1a1a2e" }} />
+            </span>
+          ))}
+          <span style={{ textAlign:"right", fontSize:11, paddingRight:4 }}>
+            {kcal > 0 ? (
+              <span>
+                <span style={{ color:"#333" }}>{kcal}</span>
+                {kcalDiff !== null && (
+                  <span style={{ fontSize:10, color: kcalDiff>50?"#e53935":kcalDiff<-50?"#43a047":"#888", marginLeft:3 }}>
+                    {kcalDiff>0?"+":""}{kcalDiff.toFixed(0)}
+                  </span>
+                )}
+              </span>
+            ) : <span style={{ color:"#ccc" }}>—</span>}
+          </span>
+        </div>
+      );
+    }
+
+    // ── Week row ──
+    function WeekRow({ weekIdx, globalWeek, weekInPhase, weekStart, phase, projStart, projEnd, dayLogs, onDayChange, targetWeight }) {
+      const [expanded, setExpanded] = useState(false);
+      const c = COLORS[phase.type];
+      const phaseTargets = phase.macros || {};
+      const targetKcal = calcKcal(phaseTargets);
+
+      // Aggregate from days
+      const days = Array.from({length:7}, (_,i) => addDays(weekStart, i));
+      const weights = days.map(d => { const dd = dayLogs[dateKey(d)]; return dd && dd.weight !== undefined ? dd.weight : null; }).filter(w => w !== null);
+      const avgWeight = weights.length > 0 ? weights.reduce((a,b)=>a+b,0)/weights.length : null;
+
+      const weekMacroTotals = MACROS.reduce((acc,m) => {
+        acc[m] = days.reduce((s,d) => { const dd = dayLogs[dateKey(d)]; return s + (dd && dd.macros && dd.macros[m] ? parseFloat(dd.macros[m]) : 0); }, 0);
+        return acc;
+      }, {});
+      const weekKcal = calcKcal(weekMacroTotals);
+      const loggedDays = days.filter(d => { const dd = dayLogs[dateKey(d)]; return dd && (Object.keys(dd.macros||{}).length>0 || dd.weight !== undefined); }).length;
+
+      const variance = avgWeight !== null ? avgWeight - projEnd : null;
+      const hitTarget = projEnd <= targetWeight;
+
+      return (
+        <div>
+          {/* Week summary row */}
+          <div className="week-header" onClick={() => setExpanded(e=>!e)}
+            style={{ display:"grid", gridTemplateColumns:"158px 50px 70px 70px 70px 80px", padding:"7px 12px", borderBottom: expanded?"none":"1px solid #f0f0f0", background: expanded ? c.rowBg : (avgWeight !== null ? "rgba(129,199,132,0.06)" : "white"), alignItems:"center" }}>
+            <span style={{ fontSize:11, color:"#444", display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{ fontSize:10, color:"#bbb", transition:"transform 0.15s", display:"inline-block", transform: expanded?"rotate(90deg)":"rotate(0deg)" }}>▶</span>
+              {fmtRange(weekStart)}
+            </span>
+            <span style={{ fontSize:11, color:"#999" }}>W{weekInPhase}</span>
+            <span style={{ fontSize:11, textAlign:"right", color:"#888" }}>{projStart.toFixed(1)}</span>
+            <span style={{ fontSize:11, textAlign:"right", color: hitTarget?"#43a047":"#333", fontWeight: hitTarget?600:400 }}>
+              {projEnd.toFixed(1)}{hitTarget?" 🎯":""}
+            </span>
+            <span style={{ fontSize:11, textAlign:"right", color: avgWeight!==null?"#1a1a2e":"#ccc" }}>
+              {avgWeight !== null ? avgWeight.toFixed(1) : "—"}
+              {weights.length > 0 && weights.length < 7 && <span style={{ fontSize:9, color:"#aaa", marginLeft:2 }}>({weights.length}d)</span>}
+            </span>
+            <span style={{ fontSize:11, textAlign:"right", color: variance===null?"#ccc":variance>0.2?"#e53935":variance<-0.2?"#43a047":"#888" }}>
+              {variance===null ? "—" : (variance>0?"+":"")+variance.toFixed(1)+" kg"}
+            </span>
+          </div>
+
+          {/* Expanded: day rows */}
+          {expanded && (
+            <div style={{ background: c.rowBg, borderBottom:"1px solid #e8e8e8" }}>
+              {/* Day header */}
+              <div style={{ display:"grid", gridTemplateColumns:"90px 70px 58px 58px 58px 58px 70px 80px", padding:"4px 12px 4px 36px", fontSize:9, color:"#aaa", letterSpacing:1.2, textTransform:"uppercase", borderBottom:"1px solid #ececec" }}>
+                <span>Day</span>
+                <span style={{ textAlign:"right", paddingRight:8 }}>Weight</span>
+                {MACROS.map(m => <span key={m} style={{ textAlign:"right", paddingRight:4 }}>{MACRO_LABELS[m]}</span>)}
+                <span style={{ textAlign:"right", paddingRight:4 }}>kcal</span>
+              </div>
+              {days.map(d => (
+                <DayRow key={dateKey(d)} date={d} phaseTargets={phaseTargets}
+                  dayData={dayLogs[dateKey(d)] || { macros:{} }}
+                  onChange={data => onDayChange(dateKey(d), data)} />
+              ))}
+              {/* Week totals */}
+              <div style={{ display:"grid", gridTemplateColumns:"90px 70px 58px 58px 58px 58px 70px 80px", padding:"6px 12px 6px 36px", borderTop:"1px solid #ddd", alignItems:"center", background:"rgba(0,0,0,0.03)" }}>
+                <span style={{ fontSize:10, color:"#666", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Week total</span>
+                <span style={{ textAlign:"right", paddingRight:8, fontSize:11, color:"#555" }}>
+                  {avgWeight !== null ? `~${avgWeight.toFixed(1)} avg` : "—"}
+                </span>
+                {MACROS.map(m => {
+                  const total = weekMacroTotals[m];
+                  const target = (phaseTargets[m]||0)*7;
+                  const diff = total > 0 ? total - target : null;
+                  return (
+                    <span key={m} style={{ textAlign:"right", paddingRight:4, fontSize:11 }}>
+                      {total > 0 ? (
+                        <span>
+                          <span style={{ color:"#333" }}>{total.toFixed(0)}</span>
+                          {diff !== null && <span style={{ fontSize:9, color: diff>10?"#e53935":diff<-10?"#43a047":"#888", marginLeft:2 }}>{diff>0?"+":""}{diff.toFixed(0)}</span>}
+                        </span>
+                      ) : <span style={{ color:"#ccc" }}>—</span>}
+                    </span>
+                  );
+                })}
+                <span style={{ textAlign:"right", paddingRight:4, fontSize:11 }}>
+                  {weekKcal > 0 ? (
+                    <span>
+                      <span style={{ color:"#333", fontWeight:500 }}>{weekKcal.toFixed(0)}</span>
+                      {targetKcal > 0 && <span style={{ fontSize:9, color: (weekKcal-targetKcal*7)>100?"#e53935":(weekKcal-targetKcal*7)<-100?"#43a047":"#888", marginLeft:2 }}>{weekKcal-targetKcal*7>0?"+":""}{(weekKcal-targetKcal*7).toFixed(0)}</span>}
+                    </span>
+                  ) : <span style={{ color:"#ccc" }}>—</span>}
+                </span>
+              </div>
+              {/* Phase targets reminder */}
+              <div style={{ padding:"4px 12px 6px 36px", fontSize:10, color:"#aaa" }}>
+                Target: {MACROS.map(m => `${phaseTargets[m]||0}g ${m}`).join(" · ")} · {targetKcal} kcal/day
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Main app ──
     function Tracker() {
       const [loaded,       setLoaded]       = useState(false);
       const [startDateStr, setStartDateStr] = useState("2026-03-16");
       const [startWeight,  setStartWeight]  = useState(79.0);
       const [targetWeight, setTargetWeight] = useState(70.0);
       const [phases,       setPhases]       = useState(DEFAULT_PHASES);
-      const [logs,         setLogs]         = useState({});
+      const [dayLogs,      setDayLogs]      = useState({});  // { "2026-03-16": { weight, macros:{} } }
       const [nextId,       setNextId]       = useState(10);
       const [editingPhase, setEditingPhase] = useState(null);
       const [editForm,     setEditForm]     = useState({});
-      const [newPhase,     setNewPhase]     = useState({ type: "deficit", kcal: 1500, lossPerWeek: 0.75, weeks: 6, label: "" });
+      const [newPhase,     setNewPhase]     = useState({ type:"deficit", macros:{protein:175,carbs:106,fat:42,fiber:25}, maintenance:2200, weeks:6, label:"" });
       const [showAdd,      setShowAdd]      = useState(false);
       const [saveStatus,   setSaveStatus]   = useState("saved");
       const [dragIdx,      setDragIdx]      = useState(null);
@@ -110,7 +322,7 @@
             if (data.startWeight  != null) setStartWeight(data.startWeight);
             if (data.targetWeight != null) setTargetWeight(data.targetWeight);
             if (data.phases)  setPhases(data.phases);
-            if (data.logs)    setLogs(data.logs);
+            if (data.dayLogs) setDayLogs(data.dayLogs);
             if (data.nextId)  setNextId(data.nextId);
           }
           setLoaded(true);
@@ -118,8 +330,8 @@
       }, []);
 
       useEffect(() => {
-        currentState.current = { startDateStr, startWeight, targetWeight, phases, logs, nextId };
-      }, [startDateStr, startWeight, targetWeight, phases, logs, nextId]);
+        currentState.current = { startDateStr, startWeight, targetWeight, phases, dayLogs, nextId };
+      }, [startDateStr, startWeight, targetWeight, phases, dayLogs, nextId]);
 
       function scheduleSave(patch) {
         const next = { ...currentState.current, ...patch };
@@ -132,49 +344,56 @@
         }, 900);
       }
 
-      const startDate = useMemo(() => getMonday(new Date(startDateStr + "T12:00:00")), [startDateStr]);
+      const startDate = useMemo(() => getMonday(new Date(startDateStr+"T12:00:00")), [startDateStr]);
 
       const weeks = useMemo(() => {
         const r = []; let wi = 0;
         for (const p of phases)
           for (let w = 0; w < p.weeks; w++)
-            r.push({ phaseId: p.id, phaseLabel: p.label, type: p.type, lossPerWeek: p.lossPerWeek, weekInPhase: w + 1, globalWeek: ++wi });
+            r.push({ phaseId:p.id, phaseLabel:p.label, type:p.type, phase:p, weekInPhase:w+1, globalWeek:++wi });
         return r;
       }, [phases]);
 
-      const proj = useMemo(() => {
+      // Project weights using averaged daily weights where available
+      const projectedWeights = useMemo(() => {
         const r = [];
         for (let i = 0; i < weeks.length; i++) {
-          const prev = i === 0 ? startWeight : (logs[weeks[i-1].globalWeek] ?? r[i-1].end);
-          const gw = weeks[i].globalWeek;
-          r.push({ start: prev, end: logs[gw] !== undefined ? logs[gw] : prev - weeks[i].lossPerWeek });
+          const w = weeks[i];
+          const weekStart = addWeeks(startDate, i);
+          const days = Array.from({length:7}, (_,d) => addDays(weekStart, d));
+          const weights = days.map(d => { const dd = dayLogs[dateKey(d)]; return dd && dd.weight !== undefined ? dd.weight : null; }).filter(x => x !== null);
+          const avgW = weights.length > 0 ? weights.reduce((a,b)=>a+b,0)/weights.length : null;
+          const lossPerWeek = phaseLossPerWeek(w.phase);
+          const prev = i === 0 ? startWeight : r[i-1].end;
+          r.push({ start: prev, end: avgW !== null ? avgW : prev - lossPerWeek });
         }
         return r;
-      }, [weeks, logs, startWeight]);
+      }, [weeks, dayLogs, startDate, startWeight]);
 
-      function logWeight(gw, val) {
-        const num = parseFloat(val);
-        const nl = { ...logs };
-        if (!isNaN(num) && num > 0) nl[gw] = num; else delete nl[gw];
-        setLogs(nl); scheduleSave({ logs: nl });
+      function handleDayChange(weekIdx, dateStr, data) {
+        const nl = { ...dayLogs, [dateStr]: data };
+        if (!data.weight && (!data.macros || Object.keys(data.macros).length === 0)) delete nl[dateStr];
+        setDayLogs(nl); scheduleSave({ dayLogs: nl });
       }
 
       function saveEdit() {
         const updated = phases.map(p => p.id === editingPhase
-          ? { ...editForm, id: p.id, lossPerWeek: parseFloat(editForm.lossPerWeek), kcal: parseInt(editForm.kcal), weeks: parseInt(editForm.weeks) } : p);
-        setEditingPhase(null); setPhases(updated); scheduleSave({ phases: updated });
+          ? { ...editForm, id:p.id, weeks:parseInt(editForm.weeks), maintenance:parseFloat(editForm.maintenance),
+              macros: Object.fromEntries(MACROS.map(m => [m, parseFloat((editForm.macros||{})[m])||0])) }
+          : p);
+        setEditingPhase(null); setPhases(updated); scheduleSave({ phases:updated });
       }
 
-      function delPhase(id) {
-        const u = phases.filter(p => p.id !== id); setPhases(u); scheduleSave({ phases: u });
-      }
+      function delPhase(id) { const u = phases.filter(p=>p.id!==id); setPhases(u); scheduleSave({ phases:u }); }
 
       function addPhase() {
         const id = nextId;
-        const updated = [...phases, { ...newPhase, id, lossPerWeek: parseFloat(newPhase.lossPerWeek), kcal: parseInt(newPhase.kcal), weeks: parseInt(newPhase.weeks) }];
-        setNewPhase({ type: "deficit", kcal: 1500, lossPerWeek: 0.75, weeks: 6, label: "" });
-        setShowAdd(false); setPhases(updated); setNextId(id + 1);
-        scheduleSave({ phases: updated, nextId: id + 1 });
+        const np = { ...newPhase, id, weeks:parseInt(newPhase.weeks), maintenance:parseFloat(newPhase.maintenance),
+          macros: Object.fromEntries(MACROS.map(m => [m, parseFloat((newPhase.macros||{})[m])||0])) };
+        const updated = [...phases, np];
+        setNewPhase({ type:"deficit", macros:{protein:175,carbs:106,fat:42,fiber:25}, maintenance:2200, weeks:6, label:"" });
+        setShowAdd(false); setPhases(updated); setNextId(id+1);
+        scheduleSave({ phases:updated, nextId:id+1 });
       }
 
       function handleDrop(e, dropIdx) {
@@ -182,190 +401,154 @@
         if (dragIdx === null || dragIdx === dropIdx) { setDragIdx(null); setDragOverIdx(null); return; }
         const oldP = [...phases], newP = [...phases];
         const [moved] = newP.splice(dragIdx, 1); newP.splice(dropIdx, 0, moved);
-        const oldMap = {}; let idx = 0;
-        for (const ph of oldP) for (let w = 1; w <= ph.weeks; w++) { oldMap[++idx] = { phaseId: ph.id, weekInPhase: w }; }
-        const newMap = {}; idx = 0;
-        for (const ph of newP) for (let w = 1; w <= ph.weeks; w++) { newMap[`${ph.id}_${w}`] = ++idx; }
-        const nl = {};
-        for (const [gw, val] of Object.entries(logs)) {
-          const o = oldMap[parseInt(gw)];
-          if (o) { const ng = newMap[`${o.phaseId}_${o.weekInPhase}`]; if (ng) nl[ng] = val; }
-        }
-        setDragIdx(null); setDragOverIdx(null); setPhases(newP); setLogs(nl);
-        scheduleSave({ phases: newP, logs: nl });
+        // dayLogs are keyed by date string so they don't need remapping
+        setDragIdx(null); setDragOverIdx(null); setPhases(newP);
+        scheduleSave({ phases:newP });
       }
 
-      const finalWeight = proj.length > 0 ? proj[proj.length - 1].end : startWeight;
+      const finalWeight = projectedWeights.length > 0 ? projectedWeights[projectedWeights.length-1].end : startWeight;
       const remaining   = finalWeight - targetWeight;
 
       const phaseGroups = useMemo(() => {
         const g = []; let cur = null;
         for (let i = 0; i < weeks.length; i++) {
           const w = weeks[i];
-          if (!cur || cur.phaseId !== w.phaseId) { cur = { phaseId: w.phaseId, label: w.phaseLabel, type: w.type, weeks: [] }; g.push(cur); }
-          cur.weeks.push({ ...w, idx: i });
+          if (!cur || cur.phaseId !== w.phaseId) { cur = { phaseId:w.phaseId, label:w.phaseLabel, type:w.type, phase:w.phase, weeks:[] }; g.push(cur); }
+          cur.weeks.push({ ...w, idx:i });
         }
         return g;
       }, [weeks]);
 
-      const fs = { border: "1px solid #ccc", borderRadius: 4, padding: "4px 8px", fontSize: 12, fontFamily: "inherit" };
-      const statusColor = saveStatus === "saved" ? "#81c784" : saveStatus === "saving" ? "#ffb74d" : "#e57373";
-      const statusText  = saveStatus === "saved" ? "✓ Saved" : saveStatus === "saving" ? "Saving…" : "⚠ Error";
+      const statusColor = saveStatus==="saved"?"#81c784":saveStatus==="saving"?"#ffb74d":"#e57373";
+      const statusText  = saveStatus==="saved"?"✓ Saved":saveStatus==="saving"?"Saving…":"⚠ Error";
 
-      if (!loaded) return (
-        <div style={{ padding: 40, color: "#888" }}>Connecting to database…</div>
-      );
+      if (!loaded) return <div style={{ padding:40, color:"#888" }}>Connecting to database…</div>;
 
       return (
-        <div style={{ minHeight: "100vh", paddingBottom: 80 }}>
+        <div style={{ minHeight:"100vh", paddingBottom:80 }}>
 
-          {/* ── Header ── */}
-          <div style={{ background: "#1a1a2e", color: "#f8f7f4", padding: "28px 32px 22px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <div style={{ fontFamily: "'DM Sans',sans-serif", fontSize: 10, letterSpacing: 3, color: "#666", textTransform: "uppercase" }}>Fat Loss Tracker</div>
-              <div style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: statusColor }}>{statusText}</div>
+          {/* Header */}
+          <div style={{ background:"#1a1a2e", color:"#f8f7f4", padding:"28px 32px 22px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+              <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, letterSpacing:3, color:"#666", textTransform:"uppercase" }}>Fat Loss Tracker</div>
+              <div style={{ fontSize:10, letterSpacing:1, textTransform:"uppercase", color:statusColor }}>{statusText}</div>
             </div>
-            <div style={{ fontFamily: "'DM Sans',sans-serif", fontSize: 26, fontWeight: 600, marginBottom: 16 }}>
-              {startWeight}kg → <span style={{ color: "#81c784" }}>{finalWeight.toFixed(1)}kg</span>
-              {" "}<span style={{ fontSize: 14, color: remaining <= 0.1 ? "#81c784" : "#ffb74d" }}>
-                {remaining <= 0.1 ? "✓ Target reached" : `(${remaining.toFixed(1)}kg short of ${targetWeight}kg)`}
+            <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:26, fontWeight:600, marginBottom:16 }}>
+              {startWeight}kg → <span style={{ color:"#81c784" }}>{finalWeight.toFixed(1)}kg</span>
+              {" "}<span style={{ fontSize:14, color:remaining<=0.1?"#81c784":"#ffb74d" }}>
+                {remaining<=0.1?"✓ Target reached":`(${remaining.toFixed(1)}kg short of ${targetWeight}kg)`}
               </span>
             </div>
-            <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
-              {[["Target", `${targetWeight} kg`], ["Weeks", weeks.length], ["Planned loss", `${(startWeight - finalWeight).toFixed(1)} kg`], ["Starts", fmt(startDate)]].map(([l, v]) => (
+            <div style={{ display:"flex", gap:28, flexWrap:"wrap" }}>
+              {[["Target",`${targetWeight} kg`],["Weeks",weeks.length],["Planned loss",`${(startWeight-finalWeight).toFixed(1)} kg`],["Starts",fmt(startDate)]].map(([l,v]) => (
                 <div key={l}>
-                  <div style={{ fontSize: 9, color: "#666", letterSpacing: 2, textTransform: "uppercase", marginBottom: 2 }}>{l}</div>
-                  <div style={{ fontSize: 17, fontWeight: 500 }}>{v}</div>
+                  <div style={{ fontSize:9, color:"#666", letterSpacing:2, textTransform:"uppercase", marginBottom:2 }}>{l}</div>
+                  <div style={{ fontSize:17, fontWeight:500 }}>{v}</div>
                 </div>
               ))}
             </div>
           </div>
 
-          <div style={{ padding: "22px 32px", maxWidth: 920 }}>
+          <div style={{ padding:"22px 32px", maxWidth:980 }}>
 
-            {/* ── Settings ── */}
-            <div style={{ display: "flex", gap: 14, marginBottom: 26, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {/* Settings */}
+            <div style={{ display:"flex", gap:14, marginBottom:26, flexWrap:"wrap", alignItems:"flex-end" }}>
               {[
-                { label: "Start Date (Monday)", type: "date",   value: startDateStr, set: v => { setStartDateStr(v); scheduleSave({ startDateStr: v }); }, w: "auto" },
-                { label: "Starting Weight (kg)", type: "number", value: startWeight,  set: v => { const n = parseFloat(v); setStartWeight(n);  scheduleSave({ startWeight: n }); },  w: 88, step: "0.1" },
-                { label: "Target Weight (kg)",   type: "number", value: targetWeight,  set: v => { const n = parseFloat(v); setTargetWeight(n); scheduleSave({ targetWeight: n }); }, w: 88, step: "0.1" },
+                { label:"Start Date (Monday)", type:"date",   value:startDateStr, set:v=>{ setStartDateStr(v); scheduleSave({startDateStr:v}); }, w:"auto" },
+                { label:"Starting Weight (kg)", type:"number", value:startWeight,  set:v=>{ const n=parseFloat(v); setStartWeight(n); scheduleSave({startWeight:n}); }, w:88, step:"0.1" },
+                { label:"Target Weight (kg)",   type:"number", value:targetWeight,  set:v=>{ const n=parseFloat(v); setTargetWeight(n); scheduleSave({targetWeight:n}); }, w:88, step:"0.1" },
               ].map(f => (
                 <div key={f.label}>
-                  <div style={{ fontSize: 9, color: "#888", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>{f.label}</div>
-                  <input type={f.type} step={f.step} value={f.value} onChange={e => f.set(e.target.value)}
-                    style={{ ...fs, padding: "6px 10px", fontSize: 13, width: f.w, background: "white" }} />
+                  <div style={{ fontSize:9, color:"#888", letterSpacing:2, textTransform:"uppercase", marginBottom:4 }}>{f.label}</div>
+                  <input type={f.type} step={f.step} value={f.value} onChange={e=>f.set(e.target.value)}
+                    style={{...fs, padding:"6px 10px", fontSize:13, width:f.w, background:"white"}} />
                 </div>
               ))}
             </div>
 
-            {/* ── Phases ── */}
-            <div style={{ marginBottom: 30 }}>
-              <div style={{ fontFamily: "'DM Sans',sans-serif", fontSize: 10, letterSpacing: 3, color: "#888", textTransform: "uppercase", marginBottom: 10 }}>
-                Phases — <span style={{ color: "#bbb" }}>drag to reorder</span>
+            {/* Phases */}
+            <div style={{ marginBottom:30 }}>
+              <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, letterSpacing:3, color:"#888", textTransform:"uppercase", marginBottom:10 }}>
+                Phases — <span style={{ color:"#bbb" }}>drag to reorder</span>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
                 {phases.map((phase, pi) => {
                   const c = COLORS[phase.type];
+                  const kcal = phaseKcal(phase);
+                  const lpw  = phaseLossPerWeek(phase);
                   if (editingPhase === phase.id) return (
-                    <div key={phase.id} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 6, padding: "10px 14px" }}>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Label</div><input value={editForm.label} onChange={e => setEditForm(f => ({ ...f, label: e.target.value }))} style={{ ...fs, width: 100 }} /></div>
-                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Type</div>
-                          <select value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))} style={fs}>
-                            <option value="deficit">Deficit</option><option value="maintenance">Maintenance</option>
-                          </select>
-                        </div>
-                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Weeks</div><input type="number" value={editForm.weeks} onChange={e => setEditForm(f => ({ ...f, weeks: e.target.value }))} style={{ ...fs, width: 55 }} /></div>
-                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>kcal/day</div><input type="number" value={editForm.kcal} onChange={e => setEditForm(f => ({ ...f, kcal: e.target.value }))} style={{ ...fs, width: 68 }} /></div>
-                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>kg/week</div><input type="number" step="0.05" value={editForm.lossPerWeek} onChange={e => setEditForm(f => ({ ...f, lossPerWeek: e.target.value }))} style={{ ...fs, width: 65 }} /></div>
-                        <button className="btn" onClick={saveEdit} style={{ background: "#1a1a2e", color: "white" }}>Save</button>
-                        <button className="btn" onClick={() => setEditingPhase(null)} style={{ background: "#eee", color: "#333" }}>Cancel</button>
-                      </div>
-                    </div>
+                    <PhaseForm key={phase.id} form={editForm} setForm={setEditForm} color={c}
+                      onSave={saveEdit} onCancel={() => setEditingPhase(null)} />
                   );
                   return (
-                    <div key={phase.id} className={dragOverIdx === pi && dragIdx !== pi ? "drag-over" : ""}
+                    <div key={phase.id} className={dragOverIdx===pi && dragIdx!==pi?"drag-over":""}
                       draggable
-                      onDragStart={e => { setDragIdx(pi); e.dataTransfer.effectAllowed = "move"; }}
-                      onDragOver={e => { e.preventDefault(); setDragOverIdx(pi); }}
-                      onDrop={e => handleDrop(e, pi)}
-                      onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
-                      style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 6, padding: "9px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", opacity: dragIdx === pi ? 0.35 : 1, cursor: "grab" }}>
-                      <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                        <span style={{ color: "#bbb", fontSize: 16 }}>⠿</span>
-                        <span style={{ fontFamily: "'DM Sans',sans-serif", fontWeight: 500, fontSize: 13, color: c.text, minWidth: 90 }}>{phase.label || c.label}</span>
-                        <span style={{ fontSize: 11, color: "#666" }}>{phase.weeks}w</span>
-                        <span style={{ fontSize: 11, color: "#666" }}>{phase.kcal} kcal</span>
-                        {phase.type === "deficit" && <span style={{ fontSize: 11, color: "#666" }}>{phase.lossPerWeek} kg/w</span>}
+                      onDragStart={e=>{ setDragIdx(pi); e.dataTransfer.effectAllowed="move"; }}
+                      onDragOver={e=>{ e.preventDefault(); setDragOverIdx(pi); }}
+                      onDrop={e=>handleDrop(e,pi)}
+                      onDragEnd={()=>{ setDragIdx(null); setDragOverIdx(null); }}
+                      style={{ background:c.bg, border:`1px solid ${c.border}`, borderRadius:6, padding:"9px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", opacity:dragIdx===pi?0.35:1, cursor:"grab" }}>
+                      <div style={{ display:"flex", gap:14, alignItems:"center", flexWrap:"wrap" }}>
+                        <span style={{ color:"#bbb", fontSize:16 }}>⠿</span>
+                        <span style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:500, fontSize:13, color:c.text, minWidth:90 }}>{phase.label}</span>
+                        <span style={{ fontSize:11, color:"#666" }}>{phase.weeks}w</span>
+                        <span style={{ fontSize:11, color:"#555" }}>{kcal} kcal · {MACROS.map(m=>`${phase.macros[m]||0}g ${m}`).join(", ")}</span>
+                        <span style={{ fontSize:11, color: lpw>=0?"#43a047":"#e53935" }}>
+                          {lpw>=0?"-":"+"}{Math.abs(lpw).toFixed(2)} kg/w
+                        </span>
                       </div>
-                      <div style={{ display: "flex", gap: 5 }}>
-                        <button className="btn" onClick={() => { setEditingPhase(phase.id); setEditForm({ ...phase }); }} style={{ background: "#1a1a2e", color: "white" }}>Edit</button>
-                        <button className="btn" onClick={() => delPhase(phase.id)} style={{ background: "#ffeaea", color: "#c62828" }}>Delete</button>
+                      <div style={{ display:"flex", gap:5 }}>
+                        <button className="btn" onClick={()=>{ setEditingPhase(phase.id); setEditForm({...phase}); }} style={{ background:"#1a1a2e", color:"white" }}>Edit</button>
+                        <button className="btn" onClick={()=>delPhase(phase.id)} style={{ background:"#ffeaea", color:"#c62828" }}>Delete</button>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginTop:8 }}>
                 {!showAdd ? (
-                  <button className="btn" onClick={() => setShowAdd(true)} style={{ background: "#1a1a2e", color: "white", padding: "6px 14px" }}>+ Add Phase</button>
+                  <button className="btn" onClick={()=>setShowAdd(true)} style={{ background:"#1a1a2e", color:"white", padding:"6px 14px" }}>+ Add Phase</button>
                 ) : (
-                  <div style={{ background: "white", border: "1px solid #ddd", borderRadius: 6, padding: "10px 14px", marginTop: 6 }}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Label</div><input placeholder="e.g. Cut 3" value={newPhase.label} onChange={e => setNewPhase(f => ({ ...f, label: e.target.value }))} style={{ ...fs, width: 100 }} /></div>
-                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Type</div>
-                        <select value={newPhase.type} onChange={e => setNewPhase(f => ({ ...f, type: e.target.value }))} style={fs}>
-                          <option value="deficit">Deficit</option><option value="maintenance">Maintenance</option>
-                        </select>
-                      </div>
-                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Weeks</div><input type="number" value={newPhase.weeks} onChange={e => setNewPhase(f => ({ ...f, weeks: e.target.value }))} style={{ ...fs, width: 55 }} /></div>
-                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>kcal/day</div><input type="number" value={newPhase.kcal} onChange={e => setNewPhase(f => ({ ...f, kcal: e.target.value }))} style={{ ...fs, width: 68 }} /></div>
-                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>kg/week</div><input type="number" step="0.05" value={newPhase.lossPerWeek} onChange={e => setNewPhase(f => ({ ...f, lossPerWeek: e.target.value }))} style={{ ...fs, width: 65 }} /></div>
-                      <button className="btn" onClick={addPhase} style={{ background: "#1a1a2e", color: "white" }}>Add</button>
-                      <button className="btn" onClick={() => setShowAdd(false)} style={{ background: "#eee", color: "#333" }}>Cancel</button>
-                    </div>
-                  </div>
+                  <PhaseForm form={newPhase} setForm={setNewPhase} color={{ bg:"white", border:"#ddd" }}
+                    onSave={addPhase} onCancel={()=>setShowAdd(false)} />
                 )}
               </div>
             </div>
 
-            {/* ── Week list ── */}
+            {/* Weekly log */}
             <div>
-              <div style={{ fontFamily: "'DM Sans',sans-serif", fontSize: 10, letterSpacing: 3, color: "#888", textTransform: "uppercase", marginBottom: 10 }}>Weekly Log</div>
-              <div style={{ display: "grid", gridTemplateColumns: "158px 50px 90px 90px 90px 110px", padding: "5px 12px", fontSize: 9, color: "#999", letterSpacing: 1.5, textTransform: "uppercase", borderBottom: "1px solid #e0e0e0" }}>
-                <span>Week</span><span>Wk</span><span style={{ textAlign: "right" }}>Proj. Start</span><span style={{ textAlign: "right" }}>Proj. End</span><span style={{ textAlign: "right" }}>Actual</span><span style={{ textAlign: "right" }}>Variance</span>
+              <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, letterSpacing:3, color:"#888", textTransform:"uppercase", marginBottom:10 }}>Weekly Log</div>
+              {/* Header */}
+              <div style={{ display:"grid", gridTemplateColumns:"158px 50px 70px 70px 70px 80px", padding:"5px 12px", fontSize:9, color:"#999", letterSpacing:1.5, textTransform:"uppercase", borderBottom:"1px solid #e0e0e0" }}>
+                <span>Week</span><span>Wk</span>
+                <span style={{ textAlign:"right" }}>Proj. Start</span>
+                <span style={{ textAlign:"right" }}>Proj. End</span>
+                <span style={{ textAlign:"right" }}>Avg Weight</span>
+                <span style={{ textAlign:"right" }}>Variance</span>
               </div>
+
               {phaseGroups.map(group => {
                 const c = COLORS[group.type];
                 return (
-                  <div key={group.phaseId} style={{ marginBottom: 3 }}>
-                    <div style={{ background: c.bg, borderLeft: `3px solid ${c.border}`, padding: "4px 12px", fontSize: 10, color: c.text, fontFamily: "'DM Sans',sans-serif", fontWeight: 600, letterSpacing: 1.5, textTransform: "uppercase" }}>
-                      {group.label || c.label}
+                  <div key={group.phaseId} style={{ marginBottom:3 }}>
+                    <div style={{ background:c.bg, borderLeft:`3px solid ${c.border}`, padding:"4px 12px", fontSize:10, color:c.text, fontFamily:"'DM Sans',sans-serif", fontWeight:600, letterSpacing:1.5, textTransform:"uppercase" }}>
+                      {group.label}
                     </div>
                     {group.weeks.map(({ globalWeek, weekInPhase, idx }) => {
                       const weekStart = addWeeks(startDate, idx);
-                      const p = proj[idx];
-                      const logged   = logs[globalWeek];
-                      const variance = logged !== undefined ? logged - p.end : null;
-                      const isLogged = logged !== undefined;
-                      const hitTarget = p.end <= targetWeight;
                       return (
-                        <div key={globalWeek} className="week-row" style={{ display: "grid", gridTemplateColumns: "158px 50px 90px 90px 90px 110px", padding: "6px 12px", borderBottom: "1px solid #f0f0f0", background: isLogged ? "rgba(129,199,132,0.06)" : "white", alignItems: "center" }}>
-                          <span style={{ fontSize: 11, color: "#444" }}>{fmtRange(weekStart)}</span>
-                          <span style={{ fontSize: 11, color: "#999" }}>W{weekInPhase}</span>
-                          <span style={{ fontSize: 11, textAlign: "right", color: "#888" }}>{p.start.toFixed(1)}</span>
-                          <span style={{ fontSize: 11, textAlign: "right", color: hitTarget ? "#43a047" : "#333", fontWeight: hitTarget ? 600 : 400 }}>
-                            {p.end.toFixed(1)}{hitTarget ? " 🎯" : ""}
-                          </span>
-                          <span style={{ textAlign: "right" }}>
-                            <input type="number" step="0.1" placeholder="—" value={logged !== undefined ? logged : ""}
-                              onChange={e => logWeight(globalWeek, e.target.value)}
-                              style={{ width: 70, textAlign: "right", border: "1px solid #e0e0e0", borderRadius: 4, padding: "2px 5px", fontSize: 11, fontFamily: "inherit", background: isLogged ? "white" : "#fafafa", color: "#1a1a2e", outline: "none" }} />
-                          </span>
-                          <span style={{ fontSize: 11, textAlign: "right", color: variance === null ? "#ccc" : variance > 0.2 ? "#e53935" : variance < -0.2 ? "#43a047" : "#888" }}>
-                            {variance === null ? "—" : (variance > 0 ? "+" : "") + variance.toFixed(1) + " kg"}
-                          </span>
-                        </div>
+                        <WeekRow key={globalWeek}
+                          weekIdx={idx}
+                          globalWeek={globalWeek}
+                          weekInPhase={weekInPhase}
+                          weekStart={weekStart}
+                          phase={group.phase}
+                          projStart={projectedWeights[idx].start}
+                          projEnd={projectedWeights[idx].end}
+                          dayLogs={dayLogs}
+                          onDayChange={(dateStr, data) => handleDayChange(idx, dateStr, data)}
+                          targetWeight={targetWeight}
+                        />
                       );
                     })}
                   </div>
