@@ -441,8 +441,11 @@
           const weights = days.map(d => { const dd = dayLogs[dateKey(d)]; return dd?.weight !== undefined ? dd.weight : null; }).filter(x => x!==null);
           const avgW = weights.length>0 ? weights.reduce((a,b)=>a+b,0)/weights.length : null;
           const lpw = parseFloat(w.phase.lossPerWeek)||0;
-          const prev = i===0 ? startWeight : r[i-1].end;
-          r.push({ start:prev, end: avgW!==null ? avgW : prev - lpw });
+          // projStart: use previous week's actual avg if available, otherwise previous projEnd
+          const prevActual = i===0 ? null : r[i-1].actualAvg;
+          const prev = i===0 ? startWeight : (prevActual!==null ? prevActual : r[i-1].projEnd);
+          const projEnd = prev - lpw;
+          r.push({ start: prev, projEnd, actualAvg: avgW });
         }
         return r;
       }, [weeks, dayLogs, startDate, startWeight]);
@@ -483,7 +486,7 @@
         setDragIdx(null); setDragOverIdx(null); setPhases(newP); scheduleSave({ phases:newP });
       }
 
-      const finalWeight = projectedWeights.length>0 ? projectedWeights[projectedWeights.length-1].end : startWeight;
+      const finalWeight = projectedWeights.length>0 ? projectedWeights[projectedWeights.length-1].projEnd : startWeight;
       const remaining   = finalWeight - targetWeight;
 
       const phaseGroups = useMemo(() => {
@@ -622,7 +625,7 @@
                           weekStart={weekStart}
                           phase={group.phase}
                           projStart={projectedWeights[idx].start}
-                          projEnd={projectedWeights[idx].end}
+                          projEnd={projectedWeights[idx].projEnd}
                           dayLogs={dayLogs}
                           onDayChange={(dateStr, data) => handleDayChange(dateStr, data)}
                           targetWeight={targetWeight}
