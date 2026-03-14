@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fat Loss Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #f8f7f4; font-family: 'DM Mono', 'Courier New', monospace; }
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+    .week-row:hover { background: rgba(0,0,0,0.02) !important; }
+    .btn { cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: 12px; padding: 5px 10px; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.8; }
+    .drag-over { outline: 2px dashed #1a1a2e; outline-offset: -2px; border-radius: 6px; }
+    select, input { font-family: inherit; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    const SUPABASE_URL = "https://qkzwhjdqyrtuuwwieftj.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_OLlLCMvJgE4IjCnPlPKJSQ_F5dJ-eYo";
+    const TABLE = "fat_loss_tracker";
+    const ROW_ID = "main";
+
+    async function sbGet() {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${ROW_ID}&select=data`, {
+          headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+        });
+        if (!res.ok) return null;
+        const rows = await res.json();
+        return rows.length > 0 ? rows[0].data : null;
+      } catch (e) { return null; }
+    }
+
+    async function sbSave(data) {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}`, {
+          method: "POST",
+          headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`,
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates"
+          },
+          body: JSON.stringify({ id: ROW_ID, data, updated_at: new Date().toISOString() })
+        });
+        return res.ok;
+      } catch (e) { return false; }
+    }
+
+    const COLORS = {
+      deficit:     { bg: "#e8f5e9", border: "#81c784", text: "#2e7d32", label: "Deficit" },
+      maintenance: { bg: "#e3f2fd", border: "#64b5f6", text: "#1565c0", label: "Maintenance" },
+    };
+
+    function getMonday(date) {
+      const d = new Date(date);
+      const day = d.getDay();
+      d.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+
+    function addWeeks(date, n) {
+      const d = new Date(date);
+      d.setDate(d.getDate() + n * 7);
+      return d;
+    }
+
+    function fmt(d) { return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short" }); }
+    function fmtRange(s) { const e = new Date(s); e.setDate(e.getDate() + 6); return `${fmt(s)} – ${fmt(e)}`; }
+
+    const DEFAULT_PHASES = [
+      { id: 1, type: "deficit",     kcal: 1500, lossPerWeek: 0.75, weeks: 6, label: "Cut 1" },
+      { id: 2, type: "maintenance", kcal: 2200, lossPerWeek: 0,    weeks: 6, label: "Maintenance 1" },
+      { id: 3, type: "deficit",     kcal: 1500, lossPerWeek: 0.75, weeks: 6, label: "Cut 2" },
+    ];
+
+    function Tracker() {
+      const [loaded,       setLoaded]       = useState(false);
+      const [startDateStr, setStartDateStr] = useState("2026-03-16");
+      const [startWeight,  setStartWeight]  = useState(79.0);
+      const [targetWeight, setTargetWeight] = useState(70.0);
+      const [phases,       setPhases]       = useState(DEFAULT_PHASES);
+      const [logs,         setLogs]         = useState({});
+      const [nextId,       setNextId]       = useState(10);
+      const [editingPhase, setEditingPhase] = useState(null);
+      const [editForm,     setEditForm]     = useState({});
+      const [newPhase,     setNewPhase]     = useState({ type: "deficit", kcal: 1500, lossPerWeek: 0.75, weeks: 6, label: "" });
+      const [showAdd,      setShowAdd]      = useState(false);
+      const [saveStatus,   setSaveStatus]   = useState("saved");
+      const [dragIdx,      setDragIdx]      = useState(null);
+      const [dragOverIdx,  setDragOverIdx]  = useState(null);
+      const saveTimeout  = useRef(null);
+      const currentState = useRef({});
+
+      useEffect(() => {
+        sbGet().then(data => {
+          if (data) {
+            if (data.startDateStr) setStartDateStr(data.startDateStr);
+            if (data.startWeight  != null) setStartWeight(data.startWeight);
+            if (data.targetWeight != null) setTargetWeight(data.targetWeight);
+            if (data.phases)  setPhases(data.phases);
+            if (data.logs)    setLogs(data.logs);
+            if (data.nextId)  setNextId(data.nextId);
+          }
+          setLoaded(true);
+        });
+      }, []);
+
+      useEffect(() => {
+        currentState.current = { startDateStr, startWeight, targetWeight, phases, logs, nextId };
+      }, [startDateStr, startWeight, targetWeight, phases, logs, nextId]);
+
+      function scheduleSave(patch) {
+        const next = { ...currentState.current, ...patch };
+        currentState.current = next;
+        setSaveStatus("saving");
+        if (saveTimeout.current) clearTimeout(saveTimeout.current);
+        saveTimeout.current = setTimeout(async () => {
+          const ok = await sbSave(currentState.current);
+          setSaveStatus(ok ? "saved" : "error");
+        }, 900);
+      }
+
+      const startDate = useMemo(() => getMonday(new Date(startDateStr + "T12:00:00")), [startDateStr]);
+
+      const weeks = useMemo(() => {
+        const r = []; let wi = 0;
+        for (const p of phases)
+          for (let w = 0; w < p.weeks; w++)
+            r.push({ phaseId: p.id, phaseLabel: p.label, type: p.type, lossPerWeek: p.lossPerWeek, weekInPhase: w + 1, globalWeek: ++wi });
+        return r;
+      }, [phases]);
+
+      const proj = useMemo(() => {
+        const r = [];
+        for (let i = 0; i < weeks.length; i++) {
+          const prev = i === 0 ? startWeight : (logs[weeks[i-1].globalWeek] ?? r[i-1].end);
+          const gw = weeks[i].globalWeek;
+          r.push({ start: prev, end: logs[gw] !== undefined ? logs[gw] : prev - weeks[i].lossPerWeek });
+        }
+        return r;
+      }, [weeks, logs, startWeight]);
+
+      function logWeight(gw, val) {
+        const num = parseFloat(val);
+        const nl = { ...logs };
+        if (!isNaN(num) && num > 0) nl[gw] = num; else delete nl[gw];
+        setLogs(nl); scheduleSave({ logs: nl });
+      }
+
+      function saveEdit() {
+        const updated = phases.map(p => p.id === editingPhase
+          ? { ...editForm, id: p.id, lossPerWeek: parseFloat(editForm.lossPerWeek), kcal: parseInt(editForm.kcal), weeks: parseInt(editForm.weeks) } : p);
+        setEditingPhase(null); setPhases(updated); scheduleSave({ phases: updated });
+      }
+
+      function delPhase(id) {
+        const u = phases.filter(p => p.id !== id); setPhases(u); scheduleSave({ phases: u });
+      }
+
+      function addPhase() {
+        const id = nextId;
+        const updated = [...phases, { ...newPhase, id, lossPerWeek: parseFloat(newPhase.lossPerWeek), kcal: parseInt(newPhase.kcal), weeks: parseInt(newPhase.weeks) }];
+        setNewPhase({ type: "deficit", kcal: 1500, lossPerWeek: 0.75, weeks: 6, label: "" });
+        setShowAdd(false); setPhases(updated); setNextId(id + 1);
+        scheduleSave({ phases: updated, nextId: id + 1 });
+      }
+
+      function handleDrop(e, dropIdx) {
+        e.preventDefault();
+        if (dragIdx === null || dragIdx === dropIdx) { setDragIdx(null); setDragOverIdx(null); return; }
+        const oldP = [...phases], newP = [...phases];
+        const [moved] = newP.splice(dragIdx, 1); newP.splice(dropIdx, 0, moved);
+        const oldMap = {}; let idx = 0;
+        for (const ph of oldP) for (let w = 1; w <= ph.weeks; w++) { oldMap[++idx] = { phaseId: ph.id, weekInPhase: w }; }
+        const newMap = {}; idx = 0;
+        for (const ph of newP) for (let w = 1; w <= ph.weeks; w++) { newMap[`${ph.id}_${w}`] = ++idx; }
+        const nl = {};
+        for (const [gw, val] of Object.entries(logs)) {
+          const o = oldMap[parseInt(gw)];
+          if (o) { const ng = newMap[`${o.phaseId}_${o.weekInPhase}`]; if (ng) nl[ng] = val; }
+        }
+        setDragIdx(null); setDragOverIdx(null); setPhases(newP); setLogs(nl);
+        scheduleSave({ phases: newP, logs: nl });
+      }
+
+      const finalWeight = proj.length > 0 ? proj[proj.length - 1].end : startWeight;
+      const remaining   = finalWeight - targetWeight;
+
+      const phaseGroups = useMemo(() => {
+        const g = []; let cur = null;
+        for (let i = 0; i < weeks.length; i++) {
+          const w = weeks[i];
+          if (!cur || cur.phaseId !== w.phaseId) { cur = { phaseId: w.phaseId, label: w.phaseLabel, type: w.type, weeks: [] }; g.push(cur); }
+          cur.weeks.push({ ...w, idx: i });
+        }
+        return g;
+      }, [weeks]);
+
+      const fs = { border: "1px solid #ccc", borderRadius: 4, padding: "4px 8px", fontSize: 12, fontFamily: "inherit" };
+      const statusColor = saveStatus === "saved" ? "#81c784" : saveStatus === "saving" ? "#ffb74d" : "#e57373";
+      const statusText  = saveStatus === "saved" ? "✓ Saved" : saveStatus === "saving" ? "Saving…" : "⚠ Error";
+
+      if (!loaded) return (
+        <div style={{ padding: 40, color: "#888" }}>Connecting to database…</div>
+      );
+
+      return (
+        <div style={{ minHeight: "100vh", paddingBottom: 80 }}>
+
+          {/* ── Header ── */}
+          <div style={{ background: "#1a1a2e", color: "#f8f7f4", padding: "28px 32px 22px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <div style={{ fontFamily: "'DM Sans',sans-serif", fontSize: 10, letterSpacing: 3, color: "#666", textTransform: "uppercase" }}>Fat Loss Tracker</div>
+              <div style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: statusColor }}>{statusText}</div>
+            </div>
+            <div style={{ fontFamily: "'DM Sans',sans-serif", fontSize: 26, fontWeight: 600, marginBottom: 16 }}>
+              {startWeight}kg → <span style={{ color: "#81c784" }}>{finalWeight.toFixed(1)}kg</span>
+              {" "}<span style={{ fontSize: 14, color: remaining <= 0.1 ? "#81c784" : "#ffb74d" }}>
+                {remaining <= 0.1 ? "✓ Target reached" : `(${remaining.toFixed(1)}kg short of ${targetWeight}kg)`}
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+              {[["Target", `${targetWeight} kg`], ["Weeks", weeks.length], ["Planned loss", `${(startWeight - finalWeight).toFixed(1)} kg`], ["Starts", fmt(startDate)]].map(([l, v]) => (
+                <div key={l}>
+                  <div style={{ fontSize: 9, color: "#666", letterSpacing: 2, textTransform: "uppercase", marginBottom: 2 }}>{l}</div>
+                  <div style={{ fontSize: 17, fontWeight: 500 }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ padding: "22px 32px", maxWidth: 920 }}>
+
+            {/* ── Settings ── */}
+            <div style={{ display: "flex", gap: 14, marginBottom: 26, flexWrap: "wrap", alignItems: "flex-end" }}>
+              {[
+                { label: "Start Date (Monday)", type: "date",   value: startDateStr, set: v => { setStartDateStr(v); scheduleSave({ startDateStr: v }); }, w: "auto" },
+                { label: "Starting Weight (kg)", type: "number", value: startWeight,  set: v => { const n = parseFloat(v); setStartWeight(n);  scheduleSave({ startWeight: n }); },  w: 88, step: "0.1" },
+                { label: "Target Weight (kg)",   type: "number", value: targetWeight,  set: v => { const n = parseFloat(v); setTargetWeight(n); scheduleSave({ targetWeight: n }); }, w: 88, step: "0.1" },
+              ].map(f => (
+                <div key={f.label}>
+                  <div style={{ fontSize: 9, color: "#888", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>{f.label}</div>
+                  <input type={f.type} step={f.step} value={f.value} onChange={e => f.set(e.target.value)}
+                    style={{ ...fs, padding: "6px 10px", fontSize: 13, width: f.w, background: "white" }} />
+                </div>
+              ))}
+            </div>
+
+            {/* ── Phases ── */}
+            <div style={{ marginBottom: 30 }}>
+              <div style={{ fontFamily: "'DM Sans',sans-serif", fontSize: 10, letterSpacing: 3, color: "#888", textTransform: "uppercase", marginBottom: 10 }}>
+                Phases — <span style={{ color: "#bbb" }}>drag to reorder</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {phases.map((phase, pi) => {
+                  const c = COLORS[phase.type];
+                  if (editingPhase === phase.id) return (
+                    <div key={phase.id} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 6, padding: "10px 14px" }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Label</div><input value={editForm.label} onChange={e => setEditForm(f => ({ ...f, label: e.target.value }))} style={{ ...fs, width: 100 }} /></div>
+                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Type</div>
+                          <select value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))} style={fs}>
+                            <option value="deficit">Deficit</option><option value="maintenance">Maintenance</option>
+                          </select>
+                        </div>
+                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Weeks</div><input type="number" value={editForm.weeks} onChange={e => setEditForm(f => ({ ...f, weeks: e.target.value }))} style={{ ...fs, width: 55 }} /></div>
+                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>kcal/day</div><input type="number" value={editForm.kcal} onChange={e => setEditForm(f => ({ ...f, kcal: e.target.value }))} style={{ ...fs, width: 68 }} /></div>
+                        <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>kg/week</div><input type="number" step="0.05" value={editForm.lossPerWeek} onChange={e => setEditForm(f => ({ ...f, lossPerWeek: e.target.value }))} style={{ ...fs, width: 65 }} /></div>
+                        <button className="btn" onClick={saveEdit} style={{ background: "#1a1a2e", color: "white" }}>Save</button>
+                        <button className="btn" onClick={() => setEditingPhase(null)} style={{ background: "#eee", color: "#333" }}>Cancel</button>
+                      </div>
+                    </div>
+                  );
+                  return (
+                    <div key={phase.id} className={dragOverIdx === pi && dragIdx !== pi ? "drag-over" : ""}
+                      draggable
+                      onDragStart={e => { setDragIdx(pi); e.dataTransfer.effectAllowed = "move"; }}
+                      onDragOver={e => { e.preventDefault(); setDragOverIdx(pi); }}
+                      onDrop={e => handleDrop(e, pi)}
+                      onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+                      style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 6, padding: "9px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", opacity: dragIdx === pi ? 0.35 : 1, cursor: "grab" }}>
+                      <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                        <span style={{ color: "#bbb", fontSize: 16 }}>⠿</span>
+                        <span style={{ fontFamily: "'DM Sans',sans-serif", fontWeight: 500, fontSize: 13, color: c.text, minWidth: 90 }}>{phase.label || c.label}</span>
+                        <span style={{ fontSize: 11, color: "#666" }}>{phase.weeks}w</span>
+                        <span style={{ fontSize: 11, color: "#666" }}>{phase.kcal} kcal</span>
+                        {phase.type === "deficit" && <span style={{ fontSize: 11, color: "#666" }}>{phase.lossPerWeek} kg/w</span>}
+                      </div>
+                      <div style={{ display: "flex", gap: 5 }}>
+                        <button className="btn" onClick={() => { setEditingPhase(phase.id); setEditForm({ ...phase }); }} style={{ background: "#1a1a2e", color: "white" }}>Edit</button>
+                        <button className="btn" onClick={() => delPhase(phase.id)} style={{ background: "#ffeaea", color: "#c62828" }}>Delete</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                {!showAdd ? (
+                  <button className="btn" onClick={() => setShowAdd(true)} style={{ background: "#1a1a2e", color: "white", padding: "6px 14px" }}>+ Add Phase</button>
+                ) : (
+                  <div style={{ background: "white", border: "1px solid #ddd", borderRadius: 6, padding: "10px 14px", marginTop: 6 }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Label</div><input placeholder="e.g. Cut 3" value={newPhase.label} onChange={e => setNewPhase(f => ({ ...f, label: e.target.value }))} style={{ ...fs, width: 100 }} /></div>
+                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Type</div>
+                        <select value={newPhase.type} onChange={e => setNewPhase(f => ({ ...f, type: e.target.value }))} style={fs}>
+                          <option value="deficit">Deficit</option><option value="maintenance">Maintenance</option>
+                        </select>
+                      </div>
+                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>Weeks</div><input type="number" value={newPhase.weeks} onChange={e => setNewPhase(f => ({ ...f, weeks: e.target.value }))} style={{ ...fs, width: 55 }} /></div>
+                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>kcal/day</div><input type="number" value={newPhase.kcal} onChange={e => setNewPhase(f => ({ ...f, kcal: e.target.value }))} style={{ ...fs, width: 68 }} /></div>
+                      <div><div style={{ fontSize: 9, color: "#666", marginBottom: 2 }}>kg/week</div><input type="number" step="0.05" value={newPhase.lossPerWeek} onChange={e => setNewPhase(f => ({ ...f, lossPerWeek: e.target.value }))} style={{ ...fs, width: 65 }} /></div>
+                      <button className="btn" onClick={addPhase} style={{ background: "#1a1a2e", color: "white" }}>Add</button>
+                      <button className="btn" onClick={() => setShowAdd(false)} style={{ background: "#eee", color: "#333" }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Week list ── */}
+            <div>
+              <div style={{ fontFamily: "'DM Sans',sans-serif", fontSize: 10, letterSpacing: 3, color: "#888", textTransform: "uppercase", marginBottom: 10 }}>Weekly Log</div>
+              <div style={{ display: "grid", gridTemplateColumns: "158px 50px 90px 90px 90px 110px", padding: "5px 12px", fontSize: 9, color: "#999", letterSpacing: 1.5, textTransform: "uppercase", borderBottom: "1px solid #e0e0e0" }}>
+                <span>Week</span><span>Wk</span><span style={{ textAlign: "right" }}>Proj. Start</span><span style={{ textAlign: "right" }}>Proj. End</span><span style={{ textAlign: "right" }}>Actual</span><span style={{ textAlign: "right" }}>Variance</span>
+              </div>
+              {phaseGroups.map(group => {
+                const c = COLORS[group.type];
+                return (
+                  <div key={group.phaseId} style={{ marginBottom: 3 }}>
+                    <div style={{ background: c.bg, borderLeft: `3px solid ${c.border}`, padding: "4px 12px", fontSize: 10, color: c.text, fontFamily: "'DM Sans',sans-serif", fontWeight: 600, letterSpacing: 1.5, textTransform: "uppercase" }}>
+                      {group.label || c.label}
+                    </div>
+                    {group.weeks.map(({ globalWeek, weekInPhase, idx }) => {
+                      const weekStart = addWeeks(startDate, idx);
+                      const p = proj[idx];
+                      const logged   = logs[globalWeek];
+                      const variance = logged !== undefined ? logged - p.end : null;
+                      const isLogged = logged !== undefined;
+                      const hitTarget = p.end <= targetWeight;
+                      return (
+                        <div key={globalWeek} className="week-row" style={{ display: "grid", gridTemplateColumns: "158px 50px 90px 90px 90px 110px", padding: "6px 12px", borderBottom: "1px solid #f0f0f0", background: isLogged ? "rgba(129,199,132,0.06)" : "white", alignItems: "center" }}>
+                          <span style={{ fontSize: 11, color: "#444" }}>{fmtRange(weekStart)}</span>
+                          <span style={{ fontSize: 11, color: "#999" }}>W{weekInPhase}</span>
+                          <span style={{ fontSize: 11, textAlign: "right", color: "#888" }}>{p.start.toFixed(1)}</span>
+                          <span style={{ fontSize: 11, textAlign: "right", color: hitTarget ? "#43a047" : "#333", fontWeight: hitTarget ? 600 : 400 }}>
+                            {p.end.toFixed(1)}{hitTarget ? " 🎯" : ""}
+                          </span>
+                          <span style={{ textAlign: "right" }}>
+                            <input type="number" step="0.1" placeholder="—" value={logged !== undefined ? logged : ""}
+                              onChange={e => logWeight(globalWeek, e.target.value)}
+                              style={{ width: 70, textAlign: "right", border: "1px solid #e0e0e0", borderRadius: 4, padding: "2px 5px", fontSize: 11, fontFamily: "inherit", background: isLogged ? "white" : "#fafafa", color: "#1a1a2e", outline: "none" }} />
+                          </span>
+                          <span style={{ fontSize: 11, textAlign: "right", color: variance === null ? "#ccc" : variance > 0.2 ? "#e53935" : variance < -0.2 ? "#43a047" : "#888" }}>
+                            {variance === null ? "—" : (variance > 0 ? "+" : "") + variance.toFixed(1) + " kg"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<Tracker />);
+  </script>
+</body>
+</html>
