@@ -228,11 +228,10 @@
 
     // ── Day row ──
     const BIOMETRICS = [
-      { key:"sodium",  label:"Sodium",  unit:"mg",  step:"10"  },
-      { key:"liquid",  label:"Liquid",  unit:"ml",  step:"50"  },
-      { key:"hrv",     label:"HRV",     unit:"ms",  step:"1"   },
-      { key:"rhr",     label:"RHR",     unit:"bpm", step:"1"   },
-      { key:"sleep",   label:"Sleep",   unit:"h",   step:"0.1" },
+      { key:"sodium",  label:"Sodium",  unit:"mg",  step:"10" },
+      { key:"liquid",  label:"Liquid",  unit:"L",   step:"0.1" },
+      { key:"hrv",     label:"HRV",     unit:"ms",  step:"1"  },
+      { key:"rhr",     label:"RHR",     unit:"bpm", step:"1"  },
       { key:"steps",   label:"Steps",   unit:"",    step:"100" },
     ];
 
@@ -303,6 +302,20 @@
                 {b.unit && <span style={{ fontSize:9, color:"#ccc" }}>{b.unit}</span>}
               </div>
             ))}
+            {/* Sleep: hours + minutes */}
+            <div style={{ display:"flex", alignItems:"center", gap:3 }}>
+              <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1 }}>Sleep</span>
+              <input type="number" step="1" min="0" max="23" placeholder="n/a"
+                value={bio.sleepH !== undefined ? bio.sleepH : ""}
+                onChange={e=>setBio("sleepH", e.target.value)}
+                style={{ width:40, textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" }} />
+              <span style={{ fontSize:9, color:"#ccc" }}>h</span>
+              <input type="number" step="1" min="0" max="59" placeholder="—"
+                value={bio.sleepM !== undefined ? bio.sleepM : ""}
+                onChange={e=>setBio("sleepM", e.target.value)}
+                style={{ width:36, textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" }} />
+              <span style={{ fontSize:9, color:"#ccc" }}>m</span>
+            </div>
           </div>
         </div>
       );
