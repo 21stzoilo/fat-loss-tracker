@@ -290,34 +290,50 @@
               ) : <span style={{ color:"#ccc" }}>—</span>}
             </span>
           </div>
-          {/* Biometrics row */}
-          <div style={{ display:"flex", flexWrap:"wrap", gap:12, padding:"2px 16px 5px 44px", alignItems:"center" }}>
-            {BIOMETRICS.map(b => (
-              <div key={b.key} style={{ display:"flex", alignItems:"center", gap:3 }}>
-                <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1 }}>{b.label}</span>
-                <input type="number" step={b.step} placeholder="n/a"
-                  value={bio[b.key] !== undefined ? bio[b.key] : ""}
-                  onChange={e=>setBio(b.key, e.target.value)}
-                  style={{ width:52, textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" }} />
-                {b.unit && <span style={{ fontSize:9, color:"#ccc" }}>{b.unit}</span>}
+          {/* Biometrics: 2-row x 3-col grid */}
+          {(()=>{
+            const iStyle = { textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" };
+            const lStyle = { fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, minWidth:46, display:"inline-block" };
+            const uStyle = { fontSize:9, color:"#ccc" };
+            const cell   = { display:"flex", alignItems:"center", gap:4 };
+            return (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"3px 32px", padding:"3px 16px 7px 44px" }}>
+                {/* Row 1 */}
+                <div style={cell}>
+                  <span style={lStyle}>Sodium</span>
+                  <input type="number" step="10" placeholder="n/a" value={bio.sodium!==undefined?bio.sodium:""} onChange={e=>setBio("sodium",e.target.value)} style={{...iStyle,width:58}} />
+                  <span style={uStyle}>mg</span>
+                </div>
+                <div style={cell}>
+                  <span style={lStyle}>HRV</span>
+                  <input type="number" step="1" placeholder="n/a" value={bio.hrv!==undefined?bio.hrv:""} onChange={e=>setBio("hrv",e.target.value)} style={{...iStyle,width:52}} />
+                  <span style={uStyle}>ms</span>
+                </div>
+                <div style={cell}>
+                  <span style={lStyle}>Steps</span>
+                  <input type="number" step="100" placeholder="n/a" value={bio.steps!==undefined?bio.steps:""} onChange={e=>setBio("steps",e.target.value)} style={{...iStyle,width:64}} />
+                </div>
+                {/* Row 2 */}
+                <div style={cell}>
+                  <span style={lStyle}>Liquid</span>
+                  <input type="number" step="0.1" placeholder="n/a" value={bio.liquid!==undefined?bio.liquid:""} onChange={e=>setBio("liquid",e.target.value)} style={{...iStyle,width:52}} />
+                  <span style={uStyle}>L</span>
+                </div>
+                <div style={cell}>
+                  <span style={lStyle}>RHR</span>
+                  <input type="number" step="1" placeholder="n/a" value={bio.rhr!==undefined?bio.rhr:""} onChange={e=>setBio("rhr",e.target.value)} style={{...iStyle,width:52}} />
+                  <span style={uStyle}>bpm</span>
+                </div>
+                <div style={cell}>
+                  <span style={lStyle}>Sleep</span>
+                  <input type="number" step="1" min="0" max="23" placeholder="n/a" value={bio.sleepH!==undefined?bio.sleepH:""} onChange={e=>setBio("sleepH",e.target.value)} style={{...iStyle,width:40}} />
+                  <span style={uStyle}>h</span>
+                  <input type="number" step="1" min="0" max="59" placeholder="n/a" value={bio.sleepM!==undefined?bio.sleepM:""} onChange={e=>setBio("sleepM",e.target.value)} style={{...iStyle,width:40}} />
+                  <span style={uStyle}>m</span>
+                </div>
               </div>
-            ))}
-            {/* Sleep: hours + minutes */}
-            <div style={{ display:"flex", alignItems:"center", gap:3 }}>
-              <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1 }}>Sleep</span>
-              <input type="number" step="1" min="0" max="23" placeholder="n/a"
-                value={bio.sleepH !== undefined ? bio.sleepH : ""}
-                onChange={e=>setBio("sleepH", e.target.value)}
-                style={{ width:40, textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" }} />
-              <span style={{ fontSize:9, color:"#ccc" }}>h</span>
-              <input type="number" step="1" min="0" max="59" placeholder="—"
-                value={bio.sleepM !== undefined ? bio.sleepM : ""}
-                onChange={e=>setBio("sleepM", e.target.value)}
-                placeholder="n/a"
-                style={{ width:46, textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" }} />
-              <span style={{ fontSize:9, color:"#ccc" }}>m</span>
-            </div>
-          </div>
+            );
+          })()}
         </div>
       );
     }
