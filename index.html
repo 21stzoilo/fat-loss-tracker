@@ -265,7 +265,7 @@
       return (
         <div className="day-row" style={{ borderBottom:"1px solid #f5f5f5" }}>
           {/* Nutrition row */}
-          <div style={{ display:"grid", gridTemplateColumns:"96px 64px 60px 60px 60px 60px 80px", padding:"5px 12px 3px 36px", alignItems:"center" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"110px 72px 68px 68px 68px 68px 90px", padding:"5px 16px 3px 44px", alignItems:"center" }}>
             <span style={{ fontSize:11, color:"#555", fontWeight:500 }}>{fmtFull(date)}</span>
             <span style={{ textAlign:"right", paddingRight:8 }}>
               <input type="number" step="0.1" placeholder="—" value={weight !== undefined ? weight : ""}
@@ -291,7 +291,7 @@
             </span>
           </div>
           {/* Biometrics row */}
-          <div style={{ display:"flex", flexWrap:"wrap", gap:12, padding:"2px 12px 5px 36px", alignItems:"center" }}>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:12, padding:"2px 16px 5px 44px", alignItems:"center" }}>
             {BIOMETRICS.map(b => (
               <div key={b.key} style={{ display:"flex", alignItems:"center", gap:3 }}>
                 <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1 }}>{b.label}</span>
@@ -313,7 +313,8 @@
               <input type="number" step="1" min="0" max="59" placeholder="—"
                 value={bio.sleepM !== undefined ? bio.sleepM : ""}
                 onChange={e=>setBio("sleepM", e.target.value)}
-                style={{ width:36, textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" }} />
+                placeholder="n/a"
+                style={{ width:46, textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" }} />
               <span style={{ fontSize:9, color:"#ccc" }}>m</span>
             </div>
           </div>
@@ -344,7 +345,7 @@
       return (
         <div>
           <div className="week-header" onClick={()=>setExpanded(e=>!e)}
-            style={{ display:"grid", gridTemplateColumns:"158px 50px 70px 70px 70px 80px", padding:"7px 12px", borderBottom: expanded?"none":"1px solid #f0f0f0", background: expanded?c.rowBg:(avgWeight!==null?"rgba(129,199,132,0.06)":"white"), alignItems:"center" }}>
+            style={{ display:"grid", gridTemplateColumns:"170px 44px 90px 90px 90px 90px", padding:"7px 16px", borderBottom: expanded?"none":"1px solid #f0f0f0", background: expanded?c.rowBg:(avgWeight!==null?"rgba(129,199,132,0.06)":"white"), alignItems:"center" }}>
             <span style={{ fontSize:11, color:"#444", display:"flex", alignItems:"center", gap:6 }}>
               <span style={{ fontSize:10, color:"#bbb", display:"inline-block", transition:"transform 0.15s", transform:expanded?"rotate(90deg)":"rotate(0deg)" }}>▶</span>
               {fmtRange(weekStart)}
@@ -366,7 +367,7 @@
           {expanded && (
             <div style={{ background:c.rowBg, borderBottom:"1px solid #e8e8e8" }}>
               {/* Day header */}
-              <div style={{ display:"grid", gridTemplateColumns:"96px 64px 60px 60px 60px 60px 80px", padding:"4px 12px 4px 36px", fontSize:9, color:"#aaa", letterSpacing:1.2, textTransform:"uppercase", borderBottom:"1px solid #ececec" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"110px 72px 68px 68px 68px 68px 90px", padding:"4px 16px 4px 44px", fontSize:9, color:"#aaa", letterSpacing:1.2, textTransform:"uppercase", borderBottom:"1px solid #ececec" }}>
                 <span>Day</span>
                 <span style={{ textAlign:"right", paddingRight:8 }}>Weight</span>
                 {MACROS.map(m => <span key={m} style={{ textAlign:"right", paddingRight:4 }}>{MACRO_LABELS[m]}</span>)}
@@ -378,7 +379,7 @@
                   onChange={data => onDayChange(dateKey(d), data)} />
               ))}
               {/* Week totals */}
-              <div style={{ display:"grid", gridTemplateColumns:"96px 64px 60px 60px 60px 60px 80px", padding:"6px 12px 6px 36px", borderTop:"1px solid #ddd", alignItems:"center", background:"rgba(0,0,0,0.03)" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"110px 72px 68px 68px 68px 68px 90px", padding:"6px 16px 6px 44px", borderTop:"1px solid #ddd", alignItems:"center", background:"rgba(0,0,0,0.03)" }}>
                 <span style={{ fontSize:10, color:"#666", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Week Σ</span>
                 <span style={{ textAlign:"right", paddingRight:8, fontSize:11, color:"#555" }}>
                   {avgWeight!==null ? `~${avgWeight.toFixed(1)}` : "—"}
@@ -410,7 +411,7 @@
                 </span>
               </div>
               {/* Target reminder */}
-              <div style={{ padding:"4px 12px 6px 36px", fontSize:10, color:"#aaa" }}>
+              <div style={{ padding:"4px 16px 6px 44px", fontSize:10, color:"#aaa" }}>
                 Target: {MACROS.map(m=>`${phaseTargets[m]||0}g ${m}`).join(" · ")} · {targetKcal} kcal/day
               </div>
             </div>
@@ -789,11 +790,11 @@
             {/* Weekly log */}
             <div>
               <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, letterSpacing:3, color:"#888", textTransform:"uppercase", marginBottom:10 }}>Weekly Log</div>
-              <div style={{ display:"grid", gridTemplateColumns:"158px 50px 70px 70px 70px 80px", padding:"5px 12px", fontSize:9, color:"#999", letterSpacing:1.5, textTransform:"uppercase", borderBottom:"1px solid #e0e0e0" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"170px 44px 90px 90px 90px 90px", padding:"5px 16px", fontSize:9, color:"#999", letterSpacing:1.5, textTransform:"uppercase", borderBottom:"1px solid #e0e0e0" }}>
                 <span>Week</span><span>Wk</span>
-                <span style={{ textAlign:"right" }}>Proj. Start</span>
-                <span style={{ textAlign:"right" }}>Proj. End</span>
-                <span style={{ textAlign:"right" }}>Avg Weight</span>
+                <span style={{ textAlign:"right" }}>Proj.&#8203;Start</span>
+                <span style={{ textAlign:"right" }}>Proj.&#8203;End</span>
+                <span style={{ textAlign:"right" }}>Avg&#8203;Weight</span>
                 <span style={{ textAlign:"right" }}>Variance</span>
               </div>
               {phaseGroups.map(group => {
