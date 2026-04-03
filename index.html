@@ -290,51 +290,51 @@
               ) : <span style={{ color:"#ccc" }}>—</span>}
             </span>
           </div>
-          {/* Biometrics: 2-row x 3-col grid */}
+          {/* Biometrics: 2-row x 3-col */}
           {(()=>{
-            const iStyle = { textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" };
-            const lStyle = { fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, minWidth:46, display:"inline-block" };
-            const uStyle = { fontSize:9, color:"#ccc" };
-            const cell   = { display:"flex", alignItems:"center", gap:4 };
+            const iStyle = { width:52, textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e0e0e0", padding:"2px 4px", background:"transparent", fontFamily:"inherit", color:"#555", outline:"none", display:"block" };
+            const lStyle = { fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, width:46, flexShrink:0 };
+            const uStyle = { fontSize:9, color:"#ccc", width:28, flexShrink:0 };
+            // Each cell: fixed-width label | fixed-width input | fixed-width unit
+            const Cell = ({label, unit, val, step, onChange}) => (
+              <div style={{ display:"flex", alignItems:"center", gap:0 }}>
+                <span style={lStyle}>{label}</span>
+                <input type="number" step={step} placeholder="n/a"
+                  value={val!==undefined?val:""} onChange={onChange}
+                  style={iStyle} />
+                <span style={uStyle}>{unit}</span>
+              </div>
+            );
             return (
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"3px 32px", padding:"3px 16px 7px 44px" }}>
-                {/* Row 1 */}
-                <div style={cell}>
-                  <span style={lStyle}>Sodium</span>
-                  <input type="number" step="10" placeholder="n/a" value={bio.sodium!==undefined?bio.sodium:""} onChange={e=>setBio("sodium",e.target.value)} style={{...iStyle,width:58}} />
-                  <span style={uStyle}>mg</span>
-                </div>
-                <div style={cell}>
-                  <span style={lStyle}>HRV</span>
-                  <input type="number" step="1" placeholder="n/a" value={bio.hrv!==undefined?bio.hrv:""} onChange={e=>setBio("hrv",e.target.value)} style={{...iStyle,width:52}} />
-                  <span style={uStyle}>ms</span>
-                </div>
-                <div style={cell}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3, max-content)", gap:"2px 16px", padding:"3px 16px 7px 44px" }}>
+                <Cell label="Sodium" unit="mg"  step="10"  val={bio.sodium} onChange={e=>setBio("sodium",e.target.value)} />
+                <Cell label="HRV"    unit="ms"  step="1"   val={bio.hrv}    onChange={e=>setBio("hrv",e.target.value)} />
+                {/* Steps col: label+input only, no unit */}
+                <div style={{ display:"flex", alignItems:"center", gap:0 }}>
                   <span style={lStyle}>Steps</span>
-                  <input type="number" step="100" placeholder="n/a" value={bio.steps!==undefined?bio.steps:""} onChange={e=>setBio("steps",e.target.value)} style={{...iStyle,width:64}} />
+                  <input type="number" step="100" placeholder="n/a"
+                    value={bio.steps!==undefined?bio.steps:""} onChange={e=>setBio("steps",e.target.value)}
+                    style={iStyle} />
+                  <span style={uStyle}></span>
                 </div>
-                {/* Row 2 */}
-                <div style={cell}>
-                  <span style={lStyle}>Liquid</span>
-                  <input type="number" step="0.1" placeholder="n/a" value={bio.liquid!==undefined?bio.liquid:""} onChange={e=>setBio("liquid",e.target.value)} style={{...iStyle,width:52}} />
-                  <span style={uStyle}>L</span>
-                </div>
-                <div style={cell}>
-                  <span style={lStyle}>RHR</span>
-                  <input type="number" step="1" placeholder="n/a" value={bio.rhr!==undefined?bio.rhr:""} onChange={e=>setBio("rhr",e.target.value)} style={{...iStyle,width:52}} />
-                  <span style={uStyle}>bpm</span>
-                </div>
-                <div style={cell}>
+
+                <Cell label="Liquid" unit="L"   step="0.1" val={bio.liquid} onChange={e=>setBio("liquid",e.target.value)} />
+                <Cell label="RHR"    unit="bpm" step="1"   val={bio.rhr}    onChange={e=>setBio("rhr",e.target.value)} />
+                {/* Sleep: h input aligned with Steps input, then m input */}
+                <div style={{ display:"flex", alignItems:"center", gap:0 }}>
                   <span style={lStyle}>Sleep</span>
-                  <input type="number" step="1" min="0" max="23" placeholder="n/a" value={bio.sleepH!==undefined?bio.sleepH:""} onChange={e=>setBio("sleepH",e.target.value)} style={{...iStyle,width:40}} />
-                  <span style={uStyle}>h</span>
-                  <input type="number" step="1" min="0" max="59" placeholder="n/a" value={bio.sleepM!==undefined?bio.sleepM:""} onChange={e=>setBio("sleepM",e.target.value)} style={{...iStyle,width:40}} />
+                  <input type="number" step="1" min="0" max="23" placeholder="n/a"
+                    value={bio.sleepH!==undefined?bio.sleepH:""} onChange={e=>setBio("sleepH",e.target.value)}
+                    style={iStyle} />
+                  <span style={{...uStyle}}>h</span>
+                  <input type="number" step="1" min="0" max="59" placeholder="n/a"
+                    value={bio.sleepM!==undefined?bio.sleepM:""} onChange={e=>setBio("sleepM",e.target.value)}
+                    style={{...iStyle}} />
                   <span style={uStyle}>m</span>
                 </div>
               </div>
             );
-          })()}
-        </div>
+          })()}        </div>
       );
     }
 
