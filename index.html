@@ -227,8 +227,18 @@
     }
 
     // ── Day row ──
+    const BIOMETRICS = [
+      { key:"sodium",  label:"Sodium",  unit:"mg",  step:"10"  },
+      { key:"liquid",  label:"Liquid",  unit:"ml",  step:"50"  },
+      { key:"hrv",     label:"HRV",     unit:"ms",  step:"1"   },
+      { key:"rhr",     label:"RHR",     unit:"bpm", step:"1"   },
+      { key:"sleep",   label:"Sleep",   unit:"h",   step:"0.1" },
+      { key:"steps",   label:"Steps",   unit:"",    step:"100" },
+    ];
+
     function DayRow({ date, phaseTargets, dayData, onChange }) {
       const macros = dayData.macros || {};
+      const bio    = dayData.bio    || {};
       const kcal = calcKcal(macros);
       const targetKcal = calcKcal(phaseTargets);
       const weight = dayData.weight;
@@ -244,34 +254,56 @@
         if (val === undefined || isNaN(val)) { const nd={...dayData}; delete nd.weight; onChange(nd); }
         else onChange({ ...dayData, weight: val });
       }
+      function setBio(k, v) {
+        const val = v === "" ? undefined : parseFloat(v);
+        const nb = {...bio};
+        if (val === undefined || isNaN(val)) delete nb[k]; else nb[k] = val;
+        onChange({ ...dayData, bio: nb });
+      }
 
       const kcalDiff = kcal > 0 ? kcal - targetKcal : null;
 
       return (
-        <div className="day-row" style={{ display:"grid", gridTemplateColumns:"96px 64px 60px 60px 60px 60px 80px", gap:0, padding:"5px 12px 5px 36px", borderBottom:"1px solid #f5f5f5", alignItems:"center" }}>
-          <span style={{ fontSize:11, color:"#888" }}>{fmtFull(date)}</span>
-          <span style={{ textAlign:"right", paddingRight:8 }}>
-            <input type="number" step="0.1" placeholder="—" value={weight !== undefined ? weight : ""}
-              onChange={e=>setWeight(e.target.value)} style={{ width:56 }} />
-          </span>
-          {MACROS.map(m => (
-            <span key={m} style={{ textAlign:"right", paddingRight:4 }}>
-              <input type="number" step="1" placeholder="—" value={macros[m] !== undefined ? macros[m] : ""}
-                onChange={e=>setMacro(m, e.target.value)} style={{ width:54 }} />
+        <div className="day-row" style={{ borderBottom:"1px solid #f5f5f5" }}>
+          {/* Nutrition row */}
+          <div style={{ display:"grid", gridTemplateColumns:"96px 64px 60px 60px 60px 60px 80px", padding:"5px 12px 3px 36px", alignItems:"center" }}>
+            <span style={{ fontSize:11, color:"#555", fontWeight:500 }}>{fmtFull(date)}</span>
+            <span style={{ textAlign:"right", paddingRight:8 }}>
+              <input type="number" step="0.1" placeholder="—" value={weight !== undefined ? weight : ""}
+                onChange={e=>setWeight(e.target.value)} style={{ width:56 }} />
             </span>
-          ))}
-          <span style={{ textAlign:"right", fontSize:11, paddingRight:4 }}>
-            {kcal > 0 ? (
-              <span>
-                <span style={{ color:"#333" }}>{kcal}</span>
-                {kcalDiff !== null && (
-                  <span style={{ fontSize:10, marginLeft:3, color: kcalDiff>50?"#e53935":kcalDiff<-50?"#43a047":"#888" }}>
-                    {kcalDiff>0?"+":""}{Math.round(kcalDiff)}
-                  </span>
-                )}
+            {MACROS.map(m => (
+              <span key={m} style={{ textAlign:"right", paddingRight:4 }}>
+                <input type="number" step="1" placeholder="—" value={macros[m] !== undefined ? macros[m] : ""}
+                  onChange={e=>setMacro(m, e.target.value)} style={{ width:54 }} />
               </span>
-            ) : <span style={{ color:"#ccc" }}>—</span>}
-          </span>
+            ))}
+            <span style={{ textAlign:"right", fontSize:11, paddingRight:4 }}>
+              {kcal > 0 ? (
+                <span>
+                  <span style={{ color:"#333" }}>{kcal}</span>
+                  {kcalDiff !== null && (
+                    <span style={{ fontSize:10, marginLeft:3, color: kcalDiff>50?"#e53935":kcalDiff<-50?"#43a047":"#888" }}>
+                      {kcalDiff>0?"+":""}{Math.round(kcalDiff)}
+                    </span>
+                  )}
+                </span>
+              ) : <span style={{ color:"#ccc" }}>—</span>}
+            </span>
+          </div>
+          {/* Biometrics row */}
+          <div style={{ display:"flex", flexWrap:"wrap", gap:12, padding:"2px 12px 5px 36px", alignItems:"center" }}>
+            {BIOMETRICS.map(b => (
+              <div key={b.key} style={{ display:"flex", alignItems:"center", gap:3 }}>
+                <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1 }}>{b.label}</span>
+                <input type="number" step={b.step} placeholder="n/a"
+                  value={bio[b.key] !== undefined ? bio[b.key] : ""}
+                  onChange={e=>setBio(b.key, e.target.value)}
+                  style={{ width:52, textAlign:"right", fontSize:10, border:"none", borderBottom:"1px solid #e8e8e8", padding:"1px 3px", background:"transparent", fontFamily:"inherit", color:"#666", outline:"none" }} />
+                {b.unit && <span style={{ fontSize:9, color:"#ccc" }}>{b.unit}</span>}
+              </div>
+            ))}
+          </div>
         </div>
       );
     }
