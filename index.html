@@ -347,7 +347,7 @@
                 {/* Sleep: h input aligned with Steps input, then m input */}
                 <div style={{ display:"flex", alignItems:"center", gap:0 }}>
                   <span style={lStyle}>Sleep</span>
-                  <input <DayInput value={bio.sleepH} onChange={v=>setBio("sleepH",v)} placeholder="n/a" style={{...iStyle,width:38}} />
+                  <DayInput value={bio.sleepH} onChange={v=>setBio("sleepH",v)} placeholder="n/a" style={{...iStyle,width:38}} />
                   <span style={{...uStyle}}>h</span>
                   <DayInput value={bio.sleepM} onChange={v=>setBio("sleepM",v)} placeholder="n/a" style={{...iStyle,width:38}} />
                   <span style={uStyle}>m</span>
