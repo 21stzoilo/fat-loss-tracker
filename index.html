@@ -243,20 +243,18 @@
       const weight = dayData.weight;
 
       function setMacro(m, v) {
-        const val = v === "" ? undefined : parseFloat(v);
         const nm = {...macros};
-        if (val === undefined || isNaN(val)) delete nm[m]; else nm[m] = val;
+        if (v === "" || v === undefined) delete nm[m]; else nm[m] = v;
         onChange({ ...dayData, macros: nm });
       }
       function setWeight(v) {
-        const val = v === "" ? undefined : parseFloat(v);
-        if (val === undefined || isNaN(val)) { const nd={...dayData}; delete nd.weight; onChange(nd); }
-        else onChange({ ...dayData, weight: val });
+        if (v === "" || v === undefined) { const nd={...dayData}; delete nd.weight; onChange(nd); }
+        else onChange({ ...dayData, weight: v });
       }
       function setBio(k, v) {
-        const val = v === "" ? undefined : parseFloat(v);
         const nb = {...bio};
-        if (val === undefined || isNaN(val)) delete nb[k]; else nb[k] = val;
+        if (v === "" || v === undefined) { delete nb[k]; }
+        else { nb[k] = v; }  // store as string while typing, parse when reading
         onChange({ ...dayData, bio: nb });
       }
 
@@ -269,12 +267,12 @@
             <span style={{ fontSize:11, color:"#555", fontWeight:500 }}>{fmtFull(date)}</span>
             <span style={{ textAlign:"right", paddingRight:8 }}>
               <input type="number" step="0.1" placeholder="—" value={weight !== undefined ? weight : ""}
-                onChange={e=>setWeight(e.target.value)} style={{ width:56 }} />
+                onChange={e=>setWeight(e.target.value)} style={{ width:56 }} type="text" inputMode="decimal" />
             </span>
             {MACROS.map(m => (
               <span key={m} style={{ textAlign:"right", paddingRight:4 }}>
                 <input type="number" step="1" placeholder="—" value={macros[m] !== undefined ? macros[m] : ""}
-                  onChange={e=>setMacro(m, e.target.value)} style={{ width:54 }} />
+                  onChange={e=>setMacro(m, e.target.value)} style={{ width:54 }} type="text" inputMode="decimal" />
               </span>
             ))}
             <span style={{ textAlign:"right", fontSize:11, paddingRight:4 }}>
@@ -299,7 +297,7 @@
             const Cell = ({label, unit, val, step, onChange}) => (
               <div style={{ display:"flex", alignItems:"center", gap:0 }}>
                 <span style={lStyle}>{label}</span>
-                <input type="number" step={step} placeholder="n/a"
+                <input type="text" inputMode="decimal" placeholder="n/a"
                   value={val!==undefined?val:""} onChange={onChange}
                   style={iStyle} />
                 <span style={uStyle}>{unit}</span>
@@ -312,7 +310,7 @@
                 {/* Steps col: label+input only, no unit */}
                 <div style={{ display:"flex", alignItems:"center", gap:0 }}>
                   <span style={lStyle}>Steps</span>
-                  <input type="number" step="100" placeholder="n/a"
+                  <input type="text" inputmode="decimal" placeholder="n/a"
                     value={bio.steps!==undefined?bio.steps:""} onChange={e=>setBio("steps",e.target.value)}
                     style={iStyle} />
                   <span style={uStyle}></span>
@@ -323,11 +321,11 @@
                 {/* Sleep: h input aligned with Steps input, then m input */}
                 <div style={{ display:"flex", alignItems:"center", gap:0 }}>
                   <span style={lStyle}>Sleep</span>
-                  <input type="number" step="1" min="0" max="23" placeholder="n/a"
+                  <input type="text" inputmode="decimal" placeholder="n/a"
                     value={bio.sleepH!==undefined?bio.sleepH:""} onChange={e=>setBio("sleepH",e.target.value)}
                     style={iStyle} />
                   <span style={{...uStyle}}>h</span>
-                  <input type="number" step="1" min="0" max="59" placeholder="n/a"
+                  <input type="text" inputmode="decimal" placeholder="n/a"
                     value={bio.sleepM!==undefined?bio.sleepM:""} onChange={e=>setBio("sleepM",e.target.value)}
                     style={{...iStyle}} />
                   <span style={uStyle}>m</span>
