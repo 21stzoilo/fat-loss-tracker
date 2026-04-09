@@ -228,33 +228,34 @@
 
     // ── Day row ──
 
-    // ── DayInput: local buffer so parent re-renders don't kill focus ──
+    // ── DayInput: uncontrolled with blur-on-commit ──
     function DayInput({ value, onChange, placeholder, style }) {
-      const normalize = v => (v !== undefined && v !== null && v !== "") ? String(v) : "";
-      const [local, setLocal] = useState(normalize(value));
-      const prevValue = useRef(normalize(value));
+      const ref = useRef(null);
 
-      // Only sync from parent if value genuinely changed externally (e.g. loaded from DB)
-      // Compare as strings to avoid number/string mismatch
+      // Sync external value into the DOM input only when it changes from outside
+      // (e.g. initial DB load). Don't do this on every render.
+      const externalValue = value !== undefined && value !== null ? String(value) : "";
+      const prevExternal = useRef(externalValue);
       useEffect(() => {
-        const norm = normalize(value);
-        if (norm !== prevValue.current) {
-          setLocal(norm);
-          prevValue.current = norm;
+        if (externalValue !== prevExternal.current) {
+          prevExternal.current = externalValue;
+          if (ref.current && document.activeElement !== ref.current) {
+            ref.current.value = externalValue;
+          }
         }
-      }, [value]);
+      }, [externalValue]);
 
       return (
         <input
+          ref={ref}
           type="text"
           inputMode="decimal"
           placeholder={placeholder || "n/a"}
-          value={local}
-          onChange={e => setLocal(e.target.value)}
-          onBlur={() => {
-            const trimmed = local.trim();
-            prevValue.current = trimmed; // update ref so next effect doesn't clobber it
-            onChange(trimmed === "" ? undefined : trimmed);
+          defaultValue={externalValue}
+          onBlur={e => {
+            const v = e.target.value.trim();
+            prevExternal.current = v;
+            onChange(v === "" ? undefined : v);
           }}
           style={{ ...style, textAlign:"right", fontSize:11, border:"none",
             borderBottom:"1px solid #e0e0e0", padding:"2px 4px", background:"transparent",
@@ -280,17 +281,19 @@
 
       function setMacro(m, v) {
         const nm = {...macros};
-        if (v === "" || v === undefined) delete nm[m]; else nm[m] = v;
+        const n = parseFloat(v);
+        if (v === "" || v === undefined || isNaN(n)) delete nm[m]; else nm[m] = n;
         onChange({ ...dayData, macros: nm });
       }
       function setWeight(v) {
-        if (v === "" || v === undefined) { const nd={...dayData}; delete nd.weight; onChange(nd); }
-        else onChange({ ...dayData, weight: v });
+        const n = parseFloat(v);
+        if (v === "" || v === undefined || isNaN(n)) { const nd={...dayData}; delete nd.weight; onChange(nd); }
+        else onChange({ ...dayData, weight: n });
       }
       function setBio(k, v) {
         const nb = {...bio};
-        if (v === "" || v === undefined) { delete nb[k]; }
-        else { nb[k] = v; }  // store as string while typing, parse when reading
+        const n = parseFloat(v);
+        if (v === "" || v === undefined || isNaN(n)) delete nb[k]; else nb[k] = n;
         onChange({ ...dayData, bio: nb });
       }
 
