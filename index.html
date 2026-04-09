@@ -239,13 +239,12 @@
         notes:  dayData.notes || "",
       }));
 
-      // Sync if a different day is passed (e.g. week reorder) or on initial DB load
+      // Only sync local state when the date key changes (different day rendered)
+      // Never sync on dayData reference change — that fires on every parent re-render
       const prevDk = useRef(dk);
-      const prevData = useRef(dayData);
       useEffect(() => {
-        if (dk !== prevDk.current || dayData !== prevData.current) {
+        if (dk !== prevDk.current) {
           prevDk.current = dk;
-          prevData.current = dayData;
           setLocal({
             weight: dayData.weight,
             macros: { ...(dayData.macros || {}) },
@@ -253,7 +252,7 @@
             notes:  dayData.notes || "",
           });
         }
-      }, [dk, dayData]);
+      }, [dk]);
 
       const commit = (updated) => {
         // Only call parent with non-empty data
