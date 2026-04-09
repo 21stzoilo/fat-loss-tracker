@@ -230,14 +230,17 @@
 
     // ── DayInput: local buffer so parent re-renders don't kill focus ──
     function DayInput({ value, onChange, placeholder, style }) {
-      const [local, setLocal] = useState(value !== undefined ? String(value) : "");
-      const committed = useRef(value);
+      const normalize = v => (v !== undefined && v !== null && v !== "") ? String(v) : "";
+      const [local, setLocal] = useState(normalize(value));
+      const prevValue = useRef(normalize(value));
 
-      // Sync if parent value changed externally (e.g. loaded from DB)
+      // Only sync from parent if value genuinely changed externally (e.g. loaded from DB)
+      // Compare as strings to avoid number/string mismatch
       useEffect(() => {
-        if (value !== committed.current) {
-          setLocal(value !== undefined ? String(value) : "");
-          committed.current = value;
+        const norm = normalize(value);
+        if (norm !== prevValue.current) {
+          setLocal(norm);
+          prevValue.current = norm;
         }
       }, [value]);
 
@@ -249,8 +252,9 @@
           value={local}
           onChange={e => setLocal(e.target.value)}
           onBlur={() => {
-            committed.current = local === "" ? undefined : local;
-            onChange(local === "" ? undefined : local);
+            const trimmed = local.trim();
+            prevValue.current = trimmed; // update ref so next effect doesn't clobber it
+            onChange(trimmed === "" ? undefined : trimmed);
           }}
           style={{ ...style, textAlign:"right", fontSize:11, border:"none",
             borderBottom:"1px solid #e0e0e0", padding:"2px 4px", background:"transparent",
