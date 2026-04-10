@@ -232,64 +232,54 @@
     function DayRow({ date, phaseTargets, dayData, onChange }) {
       const dk = dateKey(date);
       // Local copy of day data — parent re-renders don't touch this
-      const [local, setLocal] = useState(() => ({
-        weight: dayData.weight,
-        macros: { ...(dayData.macros || {}) },
-        bio:    { ...(dayData.bio    || {}) },
+      // raw: stores strings while typing; committed: parsed values sent to parent
+      const toStr = v => (v !== undefined && v !== null) ? String(v) : "";
+      const [raw, setRaw] = useState(() => ({
+        weight: toStr(dayData.weight),
+        macros: Object.fromEntries(MACROS.map(m => [m, toStr((dayData.macros||{})[m])])),
+        bio:    Object.fromEntries(["sodium","liquid","hrv","rhr","steps","sleepH","sleepM"].map(k => [k, toStr((dayData.bio||{})[k])])),
         notes:  dayData.notes || "",
       }));
 
-      // Only sync local state when the date key changes (different day rendered)
-      // Never sync on dayData reference change — that fires on every parent re-render
+      // Only re-init when switching to a different date
       const prevDk = useRef(dk);
       useEffect(() => {
         if (dk !== prevDk.current) {
           prevDk.current = dk;
-          setLocal({
-            weight: dayData.weight,
-            macros: { ...(dayData.macros || {}) },
-            bio:    { ...(dayData.bio    || {}) },
+          setRaw({
+            weight: toStr(dayData.weight),
+            macros: Object.fromEntries(MACROS.map(m => [m, toStr((dayData.macros||{})[m])])),
+            bio:    Object.fromEntries(["sodium","liquid","hrv","rhr","steps","sleepH","sleepM"].map(k => [k, toStr((dayData.bio||{})[k])])),
             notes:  dayData.notes || "",
           });
         }
       }, [dk]);
 
-      const commit = (updated) => {
-        // Only call parent with non-empty data
-        const hasData = updated.weight !== undefined
-          || Object.keys(updated.macros).length > 0
-          || Object.keys(updated.bio).length > 0
-          || updated.notes;
-        onChange(hasData ? updated : { macros: {}, bio: {} });
+      const commit = (newRaw) => {
+        const p = v => { const n = parseFloat(v); return isNaN(n) ? undefined : n; };
+        const macrosParsed = Object.fromEntries(MACROS.map(m => [m, p(newRaw.macros[m])]).filter(([,v]) => v !== undefined));
+        const bioParsed    = Object.fromEntries(Object.entries(newRaw.bio).map(([k,v]) => [k, p(v)]).filter(([,v]) => v !== undefined));
+        const weight       = p(newRaw.weight);
+        const committed = { macros: macrosParsed, bio: bioParsed, notes: newRaw.notes || undefined };
+        if (weight !== undefined) committed.weight = weight;
+        const hasData = weight !== undefined || Object.keys(macrosParsed).length > 0 || Object.keys(bioParsed).length > 0 || newRaw.notes;
+        onChange(hasData ? committed : { macros: {}, bio: {} });
       };
 
-      const setWeight = v => {
-        const n = parseFloat(v);
-        const updated = { ...local, weight: (isNaN(n) ? undefined : n) };
-        if (isNaN(n)) delete updated.weight;
-        setLocal(updated); commit(updated);
-      };
-      const setMacro = (m, v) => {
-        const n = parseFloat(v);
-        const nm = { ...local.macros };
-        if (isNaN(n)) delete nm[m]; else nm[m] = n;
-        const updated = { ...local, macros: nm };
-        setLocal(updated); commit(updated);
-      };
-      const setBio = (k, v) => {
-        const n = parseFloat(v);
-        const nb = { ...local.bio };
-        if (isNaN(n)) delete nb[k]; else nb[k] = n;
-        const updated = { ...local, bio: nb };
-        setLocal(updated); commit(updated);
-      };
-      const setNotes = v => {
-        const updated = { ...local, notes: v };
-        setLocal(updated); commit(updated);
-      };
+      // Typed value updates raw string; commit parses on blur
+      const setWeight = v => { const r = {...raw, weight: v}; setRaw(r); };
+      const setMacro  = (m, v) => { const r = {...raw, macros: {...raw.macros, [m]: v}}; setRaw(r); };
+      const setBio    = (k, v) => { const r = {...raw, bio: {...raw.bio, [k]: v}}; setRaw(r); };
+      const setNotes  = v => { const r = {...raw, notes: v}; setRaw(r); commit({...raw, notes: v}); };
 
-      const macros = local.macros;
-      const bio    = local.bio;
+      const onBlurWeight = () => commit(raw);
+      const onBlurMacro  = () => commit(raw);
+      const onBlurBio    = () => commit(raw);
+
+      // For display/calculation use parsed values
+      const p = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+      const macros = Object.fromEntries(MACROS.map(m => [m, p(raw.macros[m]) || undefined]).filter(([,v]) => v));
+      const bio    = Object.fromEntries(Object.entries(raw.bio).map(([k,v]) => [k, p(v) || undefined]).filter(([,v]) => v));
       const kcal = calcKcal(macros);
       const targetKcal = calcKcal(phaseTargets);
       const kcalDiff = kcal > 0 ? kcal - targetKcal : null;
@@ -297,10 +287,11 @@
       const iStyle = { textAlign:"right", fontSize:10, fontFamily:"inherit", color:"#555",
         border:"none", borderBottom:"1px solid #e0e0e0", padding:"2px 4px",
         background:"transparent", outline:"none" };
-      const inp = (val, onCh, w, step) => (
+      const inp = (rawVal, onCh, onBl, w) => (
         <input type="text" inputMode="decimal" placeholder="n/a"
-          value={val !== undefined && val !== null ? String(val) : ""}
+          value={rawVal}
           onChange={e => onCh(e.target.value)}
+          onBlur={onBl}
           style={{ ...iStyle, width: w || 52 }} />
       );
 
@@ -310,11 +301,11 @@
           <div style={{ display:"grid", gridTemplateColumns:"110px 72px 68px 68px 68px 68px 90px", padding:"5px 16px 3px 44px", alignItems:"center" }}>
             <span style={{ fontSize:11, color:"#555", fontWeight:500 }}>{fmtFull(date)}</span>
             <span style={{ textAlign:"right", paddingRight:8 }}>
-              {inp(local.weight, setWeight, 56)}
+              {inp(raw.weight, setWeight, onBlurWeight, 56)}
             </span>
             {MACROS.map(m => (
               <span key={m} style={{ textAlign:"right", paddingRight:4 }}>
-                {inp(macros[m], v => setMacro(m, v), 54)}
+                {inp(raw.macros[m], v => setMacro(m, v), onBlurMacro, 54)}
               </span>
             ))}
             <span style={{ textAlign:"right", fontSize:11, paddingRight:4 }}>
@@ -332,49 +323,49 @@
           </div>
           {/* Biometrics: 2-row x 3-col */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3, max-content)", gap:"2px 16px", padding:"3px 16px 7px 44px" }}>
-            {[
-              [["Sodium","mg",bio.sodium,v=>setBio("sodium",v)], ["HRV","ms",bio.hrv,v=>setBio("hrv",v)],    ["Steps","",bio.steps,v=>setBio("steps",v)]],
-              [["Liquid","L",bio.liquid,v=>setBio("liquid",v)],  ["RHR","bpm",bio.rhr,v=>setBio("rhr",v)],   null],
-            ].map((row, ri) => (
-              row.map((cell, ci) => {
-                if (!cell && ci === 2) {
-                  // Sleep cell
-                  return (
+                      {(()=>{
+            const bioFields = [
+              [["Sodium","mg","sodium"], ["HRV","ms","hrv"],  ["Steps","","steps"]],
+              [["Liquid","L","liquid"],  ["RHR","bpm","rhr"], null],
+            ];
+            const bioInp = (key, w) => (
+              <input type="text" inputMode="decimal" placeholder="n/a"
+                value={raw.bio[key] || ""}
+                onChange={e => setBio(key, e.target.value)}
+                onBlur={onBlurBio}
+                style={{ ...iStyle, width: w||52, textAlign:"right", fontSize:10, fontFamily:"inherit", color:"#555",
+                  border:"none", borderBottom:"1px solid #e0e0e0", padding:"2px 4px", background:"transparent", outline:"none" }} />
+            );
+            return (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3, max-content)", gap:"2px 16px", padding:"3px 16px 7px 44px" }}>
+                {bioFields.map((row, ri) => row.map((cell, ci) => {
+                  if (!cell) return (
                     <div key="sleep" style={{ display:"flex", alignItems:"center", gap:0 }}>
                       <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, width:46, flexShrink:0 }}>Sleep</span>
-                      <input type="text" inputMode="decimal" placeholder="n/a"
-                        value={bio.sleepH !== undefined ? String(bio.sleepH) : ""}
-                        onChange={e => setBio("sleepH", e.target.value)}
-                        style={{ ...iStyle, width:38 }} />
+                      {bioInp("sleepH", 38)}
                       <span style={{ fontSize:9, color:"#ccc", width:16 }}>h</span>
-                      <input type="text" inputMode="decimal" placeholder="n/a"
-                        value={bio.sleepM !== undefined ? String(bio.sleepM) : ""}
-                        onChange={e => setBio("sleepM", e.target.value)}
-                        style={{ ...iStyle, width:38 }} />
+                      {bioInp("sleepM", 38)}
                       <span style={{ fontSize:9, color:"#ccc", width:16 }}>m</span>
                     </div>
                   );
-                }
-                if (!cell) return <div key={`empty-${ri}-${ci}`} />;
-                const [label, unit, val, onCh] = cell;
-                return (
-                  <div key={label} style={{ display:"flex", alignItems:"center", gap:0 }}>
-                    <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, width:46, flexShrink:0 }}>{label}</span>
-                    <input type="text" inputMode="decimal" placeholder="n/a"
-                      value={val !== undefined ? String(val) : ""}
-                      onChange={e => onCh(e.target.value)}
-                      style={{ ...iStyle, width: label==="Steps"?64:52 }} />
-                    {unit && <span style={{ fontSize:9, color:"#ccc", width:28 }}>{unit}</span>}
-                  </div>
-                );
-              })
-            ))}
+                  const [label, unit, key] = cell;
+                  return (
+                    <div key={key} style={{ display:"flex", alignItems:"center", gap:0 }}>
+                      <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, width:46, flexShrink:0 }}>{label}</span>
+                      {bioInp(key, key==="steps"?64:52)}
+                      {unit && <span style={{ fontSize:9, color:"#ccc", width:28 }}>{unit}</span>}
+                    </div>
+                  );
+                }))}
+              </div>
+            );
+          })()}
           </div>
           {/* Notes */}
           <div style={{ padding:"2px 16px 6px 44px" }}>
             <textarea
               placeholder="Notes…"
-              value={local.notes}
+              value={raw.notes}
               onChange={e => setNotes(e.target.value)}
               rows="1"
               style={{ width:"100%", fontSize:10, fontFamily:"inherit", color:"#555", background:"transparent", border:"none", borderBottom:"1px solid #e0e0e0", outline:"none", resize:"vertical", padding:"2px 0", lineHeight:1.5 }}
