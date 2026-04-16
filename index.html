@@ -241,6 +241,7 @@
         macros: Object.fromEntries(MACROS.map(m => [m, toStr((dayData.macros||{})[m])])),
         bio:    Object.fromEntries(["sodium","liquid","hrv","rhr","steps","sleepH","sleepM"].map(k => [k, toStr((dayData.bio||{})[k])])),
         supps:  { mg: !!(dayData.supps||{}).mg, k: !!(dayData.supps||{}).k },
+        cardio: { kcal: toStr((dayData.cardio||{}).kcal), notes: (dayData.cardio||{}).notes || "" },
         notes:  dayData.notes || "",
       }));
 
@@ -254,6 +255,7 @@
             macros: Object.fromEntries(MACROS.map(m => [m, toStr((dayData.macros||{})[m])])),
             bio:    Object.fromEntries(["sodium","liquid","hrv","rhr","steps","sleepH","sleepM"].map(k => [k, toStr((dayData.bio||{})[k])])),
             supps:  { mg: !!(dayData.supps||{}).mg, k: !!(dayData.supps||{}).k },
+            cardio: { kcal: toStr((dayData.cardio||{}).kcal), notes: (dayData.cardio||{}).notes || "" },
             notes:  dayData.notes || "",
           });
         }
@@ -267,10 +269,16 @@
         const suppsParsed  = {};
         if (newRaw.supps?.mg) suppsParsed.mg = true;
         if (newRaw.supps?.k)  suppsParsed.k  = true;
-        const committed = { macros: macrosParsed, bio: bioParsed, supps: suppsParsed, notes: newRaw.notes || undefined };
+        const cardioKcal   = p(newRaw.cardio?.kcal);
+        const cardioNotes  = newRaw.cardio?.notes || "";
+        const cardioParsed = {};
+        if (cardioKcal !== undefined) cardioParsed.kcal = cardioKcal;
+        if (cardioNotes) cardioParsed.notes = cardioNotes;
+        const committed = { macros: macrosParsed, bio: bioParsed, supps: suppsParsed, cardio: cardioParsed, notes: newRaw.notes || undefined };
         if (weight !== undefined) committed.weight = weight;
-        const hasSupps = Object.keys(suppsParsed).length > 0;
-        const hasData = weight !== undefined || Object.keys(macrosParsed).length > 0 || Object.keys(bioParsed).length > 0 || hasSupps || newRaw.notes;
+        const hasSupps  = Object.keys(suppsParsed).length > 0;
+        const hasCardio = Object.keys(cardioParsed).length > 0;
+        const hasData = weight !== undefined || Object.keys(macrosParsed).length > 0 || Object.keys(bioParsed).length > 0 || hasSupps || hasCardio || newRaw.notes;
         onChange(hasData ? committed : { macros: {}, bio: {} });
       };
 
@@ -279,6 +287,7 @@
       const setMacro  = (m, v) => { const r = {...raw, macros: {...raw.macros, [m]: v}}; setRaw(r); };
       const setBio    = (k, v) => { const r = {...raw, bio: {...raw.bio, [k]: v}}; setRaw(r); };
       const setSupp   = (k, v) => { const r = {...raw, supps: {...raw.supps, [k]: v}}; setRaw(r); commit(r); };
+      const setCardio = (k, v) => { const r = {...raw, cardio: {...raw.cardio, [k]: v}}; setRaw(r); };
       const setNotes  = v => { const r = {...raw, notes: v}; setRaw(r); commit({...raw, notes: v}); };
 
       const onBlurWeight = () => commit(raw);
@@ -388,6 +397,21 @@
               </div>
             );
           })()}
+          </div>
+          {/* Cardio */}
+          <div style={{ padding:"2px 16px 4px 44px", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, width:46, flexShrink:0 }}>Cardio</span>
+            <input type="text" inputMode="decimal" placeholder="kcal"
+              value={raw.cardio.kcal}
+              onChange={e => setCardio("kcal", e.target.value)}
+              onBlur={() => commit(raw)}
+              style={{ ...iStyle, width:52, textAlign:"right", fontSize:10 }} />
+            <span style={{ fontSize:9, color:"#ccc" }}>kcal</span>
+            <input type="text" placeholder="Cardio notes (e.g. 30min zone 2 cycling)…"
+              value={raw.cardio.notes}
+              onChange={e => setCardio("notes", e.target.value)}
+              onBlur={() => commit(raw)}
+              style={{ flex:1, fontSize:10, fontFamily:"inherit", color:"#555", background:"transparent", border:"none", borderBottom:"1px solid #e0e0e0", outline:"none", padding:"2px 4px" }} />
           </div>
           {/* Notes */}
           <div style={{ padding:"2px 16px 6px 44px" }}>
