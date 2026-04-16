@@ -240,6 +240,7 @@
         weight: toStr(dayData.weight),
         macros: Object.fromEntries(MACROS.map(m => [m, toStr((dayData.macros||{})[m])])),
         bio:    Object.fromEntries(["sodium","liquid","hrv","rhr","steps","sleepH","sleepM"].map(k => [k, toStr((dayData.bio||{})[k])])),
+        supps:  { mg: !!(dayData.supps||{}).mg, k: !!(dayData.supps||{}).k },
         notes:  dayData.notes || "",
       }));
 
@@ -252,6 +253,7 @@
             weight: toStr(dayData.weight),
             macros: Object.fromEntries(MACROS.map(m => [m, toStr((dayData.macros||{})[m])])),
             bio:    Object.fromEntries(["sodium","liquid","hrv","rhr","steps","sleepH","sleepM"].map(k => [k, toStr((dayData.bio||{})[k])])),
+            supps:  { mg: !!(dayData.supps||{}).mg, k: !!(dayData.supps||{}).k },
             notes:  dayData.notes || "",
           });
         }
@@ -262,9 +264,13 @@
         const macrosParsed = Object.fromEntries(MACROS.map(m => [m, p(newRaw.macros[m])]).filter(([,v]) => v !== undefined));
         const bioParsed    = Object.fromEntries(Object.entries(newRaw.bio).map(([k,v]) => [k, p(v)]).filter(([,v]) => v !== undefined));
         const weight       = p(newRaw.weight);
-        const committed = { macros: macrosParsed, bio: bioParsed, notes: newRaw.notes || undefined };
+        const suppsParsed  = {};
+        if (newRaw.supps?.mg) suppsParsed.mg = true;
+        if (newRaw.supps?.k)  suppsParsed.k  = true;
+        const committed = { macros: macrosParsed, bio: bioParsed, supps: suppsParsed, notes: newRaw.notes || undefined };
         if (weight !== undefined) committed.weight = weight;
-        const hasData = weight !== undefined || Object.keys(macrosParsed).length > 0 || Object.keys(bioParsed).length > 0 || newRaw.notes;
+        const hasSupps = Object.keys(suppsParsed).length > 0;
+        const hasData = weight !== undefined || Object.keys(macrosParsed).length > 0 || Object.keys(bioParsed).length > 0 || hasSupps || newRaw.notes;
         onChange(hasData ? committed : { macros: {}, bio: {} });
       };
 
@@ -272,6 +278,7 @@
       const setWeight = v => { const r = {...raw, weight: v}; setRaw(r); };
       const setMacro  = (m, v) => { const r = {...raw, macros: {...raw.macros, [m]: v}}; setRaw(r); };
       const setBio    = (k, v) => { const r = {...raw, bio: {...raw.bio, [k]: v}}; setRaw(r); };
+      const setSupp   = (k, v) => { const r = {...raw, supps: {...raw.supps, [k]: v}}; setRaw(r); commit(r); };
       const setNotes  = v => { const r = {...raw, notes: v}; setRaw(r); commit({...raw, notes: v}); };
 
       const onBlurWeight = () => commit(raw);
@@ -329,12 +336,12 @@
               ) : <span style={{ color:"#ccc" }}>—</span>}
             </span>
           </div>
-          {/* Biometrics: 2-row x 3-col */}
+          {/* Biometrics: 2-row x 4-col */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3, max-content)", gap:"2px 16px", padding:"3px 16px 7px 44px" }}>
                       {(()=>{
             const bioFields = [
-              [["Sodium","mg","sodium"], ["HRV","ms","hrv"],  ["Steps","","steps"]],
-              [["Liquid","L","liquid"],  ["RHR","bpm","rhr"], null],
+              [["Sodium","mg","sodium"], ["HRV","ms","hrv"],  ["Steps","","steps"], ["supp","","mg"]],
+              [["Liquid","L","liquid"],  ["RHR","bpm","rhr"], ["sleep","",""],      ["supp","","k"]],
             ];
             const bioInp = (key, w) => (
               <input type="text" inputMode="decimal" placeholder="n/a"
@@ -344,18 +351,31 @@
                 style={{ ...iStyle, width: w||52, textAlign:"right", fontSize:10, fontFamily:"inherit", color:"#555",
                   border:"none", borderBottom:"1px solid #e0e0e0", padding:"2px 4px", background:"transparent", outline:"none" }} />
             );
+            const suppBox = (key, label) => (
+              <label key={`supp-${key}`} style={{ display:"flex", alignItems:"center", gap:4, cursor:"pointer", userSelect:"none" }}>
+                <input type="checkbox" checked={!!raw.supps[key]} onChange={e => setSupp(key, e.target.checked)}
+                  style={{ width:13, height:13, cursor:"pointer", accentColor:"#1a1a2e", margin:0 }} />
+                <span style={{ fontSize:9, color: raw.supps[key] ? "#1a1a2e" : "#bbb", textTransform:"uppercase", letterSpacing:1, fontWeight: raw.supps[key] ? 600 : 400 }}>{label}</span>
+              </label>
+            );
             return (
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3, max-content)", gap:"2px 16px", padding:"3px 16px 7px 44px" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4, max-content)", gap:"2px 16px", padding:"3px 16px 7px 44px" }}>
                 {bioFields.map((row, ri) => row.map((cell, ci) => {
-                  if (!cell) return (
-                    <div key="sleep" style={{ display:"flex", alignItems:"center", gap:0 }}>
-                      <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, width:46, flexShrink:0 }}>Sleep</span>
-                      {bioInp("sleepH", 38)}
-                      <span style={{ fontSize:9, color:"#ccc", width:16 }}>h</span>
-                      {bioInp("sleepM", 38)}
-                      <span style={{ fontSize:9, color:"#ccc", width:16 }}>m</span>
-                    </div>
-                  );
+                  if (cell[0] === "sleep") {
+                    return (
+                      <div key="sleep" style={{ display:"flex", alignItems:"center", gap:0 }}>
+                        <span style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, width:46, flexShrink:0 }}>Sleep</span>
+                        {bioInp("sleepH", 38)}
+                        <span style={{ fontSize:9, color:"#ccc", width:16 }}>h</span>
+                        {bioInp("sleepM", 38)}
+                        <span style={{ fontSize:9, color:"#ccc", width:16 }}>m</span>
+                      </div>
+                    );
+                  }
+                  if (cell[0] === "supp") {
+                    const key = cell[2];
+                    return <div key={`supp-cell-${key}`}>{suppBox(key, key === "mg" ? "Magnesium" : "Potassium")}</div>;
+                  }
                   const [label, unit, key] = cell;
                   return (
                     <div key={key} style={{ display:"flex", alignItems:"center", gap:0 }}>
