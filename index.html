@@ -589,6 +589,7 @@
 
       const allVals = [
         ...filtered.map(d=>d.proj),
+        ...filtered.map(d=>d.plan).filter(v=>v!==undefined),
         ...filtered.map(d=>d.actual).filter(v=>v!==null),
         targetWeight
       ];
@@ -601,6 +602,7 @@
 
       // Build SVG paths
       const projPath = filtered.map((d,i)=>`${i===0?"M":"L"}${x(i).toFixed(1)},${y(d.proj).toFixed(1)}`).join(" ");
+      const planPath = filtered.map((d,i)=>`${i===0?"M":"L"}${x(i).toFixed(1)},${y(d.plan).toFixed(1)}`).join(" ");
       const actualSegs = [];
       let seg = [];
       for (let i=0; i<filtered.length; i++) {
@@ -653,6 +655,9 @@
               </g>
             )}
 
+            {/* Pure plan line — purple, thin, no adaptation */}
+            <path d={planPath} fill="none" stroke="#ba68c8" strokeWidth="1.5" strokeLinejoin="round" strokeDasharray="2,2" />
+
             {/* Projected line — light green */}
             <path d={projPath} fill="none" stroke="#a5d6a7" strokeWidth="2" strokeLinejoin="round" />
 
@@ -673,7 +678,11 @@
           </svg>
 
           {/* Legend */}
-          <div style={{ display:"flex", gap:16, marginTop:4 }}>
+          <div style={{ display:"flex", gap:16, marginTop:4, flexWrap:"wrap" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:10, color:"#888" }}>
+              <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#ba68c8" strokeWidth="1.5" strokeDasharray="2,2"/></svg>
+              Plan
+            </div>
             <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:10, color:"#888" }}>
               <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#a5d6a7" strokeWidth="2"/></svg>
               Projected
@@ -777,7 +786,10 @@
           const prevActual = i===0 ? null : r[i-1].actualAvg;
           const prev = i===0 ? startWeight : (prevActual!==null ? prevActual : r[i-1].projEnd);
           const projEnd = prev - lpw;
-          r.push({ start: prev, projEnd, actualAvg: avgW });
+          // Pure plan projection: never influenced by logs
+          const prevPlan = i===0 ? startWeight : r[i-1].planEnd;
+          const planEnd = prevPlan - lpw;
+          r.push({ start: prev, projEnd, actualAvg: avgW, planEnd });
         }
         return r;
       }, [weeks, dayLogs, startDate, startWeight]);
@@ -886,6 +898,7 @@
             label: fmt(weekStart),
             date: weekStart,
             proj: projectedWeights[i].projEnd,
+            plan: projectedWeights[i].planEnd,
             actual: projectedWeights[i].actualAvg,
           };
         });
