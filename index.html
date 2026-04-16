@@ -58,6 +58,7 @@
     const COLORS = {
       deficit:     { bg: "#e8f5e9", border: "#81c784", text: "#2e7d32", rowBg: "#f1f8f1" },
       maintenance: { bg: "#e3f2fd", border: "#64b5f6", text: "#1565c0", rowBg: "#f0f6fd" },
+      context:     { bg: "#f5f5f5", border: "#bdbdbd", text: "#616161", rowBg: "#fafafa" },
     };
 
     const MACROS = ["protein","carbs","fat","fiber"];
@@ -114,6 +115,7 @@
     function fmtFull(d) { return d.toLocaleDateString("es-AR", { weekday:"short", day:"2-digit", month:"short" }); }
     function fmtRange(s) { const e = addDays(s,6); return `${fmt(s)} – ${fmt(e)}`; }
     function dateKey(d) { return d.toISOString().slice(0,10); }
+    function parseKey(k) { return new Date(k + "T12:00:00"); }
 
     const DEFAULT_PHASES = [
       { id:1, type:"deficit",     label:"Cut 1",         weeks:6, maintenance:2200, lossPerWeek:0.75, phaseWeight:79, overrides:{}, fiber:25 },
@@ -229,7 +231,7 @@
     // ── Day row ──
 
     // ── DayRow: owns all local field state, only syncs to parent on blur ──
-    function DayRow({ date, phaseTargets, dayData, onChange }) {
+    function DayRow({ date, phaseTargets, dayData, onChange, onRemove }) {
       const dk = dateKey(date);
       // Local copy of day data — parent re-renders don't touch this
       // raw: stores strings while typing; committed: parsed values sent to parent
@@ -281,8 +283,8 @@
       const macros = Object.fromEntries(MACROS.map(m => [m, p(raw.macros[m]) || undefined]).filter(([,v]) => v));
       const bio    = Object.fromEntries(Object.entries(raw.bio).map(([k,v]) => [k, p(v) || undefined]).filter(([,v]) => v));
       const kcal = calcKcal(macros);
-      const targetKcal = calcKcal(phaseTargets);
-      const kcalDiff = kcal > 0 ? kcal - targetKcal : null;
+      const targetKcal = phaseTargets ? calcKcal(phaseTargets) : 0;
+      const kcalDiff = (kcal > 0 && targetKcal > 0) ? kcal - targetKcal : null;
 
       const iStyle = { textAlign:"right", fontSize:10, fontFamily:"inherit", color:"#555",
         border:"none", borderBottom:"1px solid #e0e0e0", padding:"2px 4px",
@@ -296,10 +298,16 @@
       );
 
       return (
-        <div className="day-row" style={{ borderBottom:"1px solid #f5f5f5" }}>
+        <div className="day-row" style={{ borderBottom:"1px solid #f5f5f5", position:"relative" }}>
           {/* Nutrition row */}
           <div style={{ display:"grid", gridTemplateColumns:"110px 72px 68px 68px 68px 68px 90px", padding:"5px 16px 3px 44px", alignItems:"center" }}>
-            <span style={{ fontSize:11, color:"#555", fontWeight:500 }}>{fmtFull(date)}</span>
+            <span style={{ fontSize:11, color:"#555", fontWeight:500, display:"flex", alignItems:"center", gap:4 }}>
+              {fmtFull(date)}
+              {onRemove && (
+                <span onClick={onRemove} title="Remove day"
+                  style={{ cursor:"pointer", color:"#bbb", fontSize:11, marginLeft:2, padding:"0 3px" }}>✕</span>
+              )}
+            </span>
             <span style={{ textAlign:"right", paddingRight:8 }}>
               {inp(raw.weight, setWeight, onBlurWeight, 56)}
             </span>
@@ -371,6 +379,41 @@
               style={{ width:"100%", fontSize:10, fontFamily:"inherit", color:"#555", background:"transparent", border:"none", borderBottom:"1px solid #e0e0e0", outline:"none", resize:"vertical", padding:"2px 0", lineHeight:1.5 }}
             />
           </div>
+        </div>
+      );
+    }
+
+    // ── Context section (days before/after phases) ──
+    function ContextSection({ label, dates, dayLogs, onDayChange, onRemoveDay }) {
+      const [expanded, setExpanded] = useState(true);
+      const c = COLORS.context;
+
+      if (dates.length === 0) return null;
+
+      return (
+        <div style={{ marginBottom:3 }}>
+          <div className="week-header" onClick={()=>setExpanded(e=>!e)}
+            style={{ background:c.bg, borderLeft:`3px solid ${c.border}`, padding:"4px 12px", fontSize:10, color:c.text, fontFamily:"'DM Sans',sans-serif", fontWeight:600, letterSpacing:1.5, textTransform:"uppercase", display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:9, color:"#999", display:"inline-block", transition:"transform 0.15s", transform:expanded?"rotate(90deg)":"rotate(0deg)" }}>▶</span>
+            {label} · {dates.length} day{dates.length!==1?"s":""}
+          </div>
+          {expanded && (
+            <div style={{ background:c.rowBg, borderBottom:"1px solid #e8e8e8" }}>
+              {/* Day header */}
+              <div style={{ display:"grid", gridTemplateColumns:"110px 72px 68px 68px 68px 68px 90px", padding:"4px 16px 4px 44px", fontSize:9, color:"#aaa", letterSpacing:1.2, textTransform:"uppercase", borderBottom:"1px solid #ececec" }}>
+                <span>Day</span>
+                <span style={{ textAlign:"right", paddingRight:8 }}>Weight</span>
+                {MACROS.map(m => <span key={m} style={{ textAlign:"right", paddingRight:4 }}>{MACRO_LABELS[m]}</span>)}
+                <span style={{ textAlign:"right", paddingRight:4 }}>kcal</span>
+              </div>
+              {dates.map(d => (
+                <DayRow key={dateKey(d)} date={d} phaseTargets={null}
+                  dayData={dayLogs[dateKey(d)] || { macros:{} }}
+                  onChange={data => onDayChange(dateKey(d), data)}
+                  onRemove={() => onRemoveDay(dateKey(d))} />
+              ))}
+            </div>
+          )}
         </div>
       );
     }
@@ -613,6 +656,8 @@
       const [phases,       setPhases]       = useState(DEFAULT_PHASES);
       const [dayLogs,      setDayLogs]      = useState({});
       const [nextId,       setNextId]       = useState(10);
+      const [contextBefore, setContextBefore] = useState([]); // array of date keys
+      const [contextAfter,  setContextAfter]  = useState([]); // array of date keys
       const [editingPhase, setEditingPhase] = useState(null);
       const [editForm,     setEditForm]     = useState({});
       const [newPhase,     setNewPhase]     = useState({ type:"deficit", label:"", weeks:6, maintenance:2200, lossPerWeek:0.75, phaseWeight:79, overrides:{}, fiber:25 });
@@ -632,14 +677,16 @@
             if (data.phases)  setPhases(data.phases);
             if (data.dayLogs) setDayLogs(data.dayLogs);
             if (data.nextId)  setNextId(data.nextId);
+            if (data.contextBefore) setContextBefore(data.contextBefore);
+            if (data.contextAfter)  setContextAfter(data.contextAfter);
           }
           setLoaded(true);
         });
       }, []);
 
       useEffect(() => {
-        currentState.current = { startDateStr, startWeight, targetWeight, phases, dayLogs, nextId };
-      }, [startDateStr, startWeight, targetWeight, phases, dayLogs, nextId]);
+        currentState.current = { startDateStr, startWeight, targetWeight, phases, dayLogs, nextId, contextBefore, contextAfter };
+      }, [startDateStr, startWeight, targetWeight, phases, dayLogs, nextId, contextBefore, contextAfter]);
 
       function scheduleSave(patch) {
         const next = { ...currentState.current, ...patch };
@@ -661,6 +708,12 @@
             r.push({ phaseId:p.id, phaseLabel:p.label, type:p.type, phase:p, weekInPhase:w+1, globalWeek:++wi });
         return r;
       }, [phases]);
+
+      // End of plan (day after last plan week) — used for "add day after"
+      const planEndDate = useMemo(() => {
+        if (weeks.length === 0) return startDate;
+        return addDays(addWeeks(startDate, weeks.length), 0); // Monday of week after last = day after last Sunday
+      }, [weeks, startDate]);
 
       const projectedWeights = useMemo(() => {
         const r = [];
@@ -689,6 +742,49 @@
         const nl = { ...dayLogs, [dateStr]: data };
         if (!data.weight && (!data.macros || Object.keys(data.macros).length===0)) delete nl[dateStr];
         setDayLogs(nl); scheduleSave({ dayLogs:nl });
+      }
+
+      // ── Context day management ──
+      function addDayBefore() {
+        // Earliest anchor: either earliest contextBefore date, or startDate
+        const earliest = contextBefore.length > 0
+          ? parseKey(contextBefore[0])
+          : startDate;
+        const newDate = addDays(earliest, -1);
+        const newKey = dateKey(newDate);
+        if (contextBefore.includes(newKey)) return;
+        const updated = [newKey, ...contextBefore].sort();
+        setContextBefore(updated);
+        scheduleSave({ contextBefore: updated });
+      }
+
+      function addDayAfter() {
+        // Latest anchor: either latest contextAfter date, or day after plan ends
+        const latest = contextAfter.length > 0
+          ? parseKey(contextAfter[contextAfter.length - 1])
+          : addDays(planEndDate, -1); // planEndDate is Monday after last week; we want the day after last Sunday which is planEndDate itself
+        const newDate = addDays(latest, 1);
+        const newKey = dateKey(newDate);
+        if (contextAfter.includes(newKey)) return;
+        const updated = [...contextAfter, newKey].sort();
+        setContextAfter(updated);
+        scheduleSave({ contextAfter: updated });
+      }
+
+      function removeContextDay(dateStr, which) {
+        // Remove from context list AND wipe the log entry
+        const nl = { ...dayLogs };
+        delete nl[dateStr];
+        setDayLogs(nl);
+        if (which === "before") {
+          const updated = contextBefore.filter(k => k !== dateStr);
+          setContextBefore(updated);
+          scheduleSave({ contextBefore: updated, dayLogs: nl });
+        } else {
+          const updated = contextAfter.filter(k => k !== dateStr);
+          setContextAfter(updated);
+          scheduleSave({ contextAfter: updated, dayLogs: nl });
+        }
       }
 
       function saveEdit() {
@@ -750,6 +846,10 @@
           };
         });
       }, [weeks, projectedWeights, startDate]);
+
+      // Context date objects (sorted)
+      const contextBeforeDates = useMemo(() => contextBefore.map(parseKey), [contextBefore]);
+      const contextAfterDates  = useMemo(() => contextAfter.map(parseKey),  [contextAfter]);
 
       if (!loaded) return <div style={{ padding:40, color:"#888" }}>Connecting to database…</div>;
 
@@ -853,6 +953,28 @@
             {/* Weekly log */}
             <div>
               <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, letterSpacing:3, color:"#888", textTransform:"uppercase", marginBottom:10 }}>Weekly Log</div>
+
+              {/* + Add day before */}
+              <div style={{ marginBottom:6 }}>
+                <button className="btn" onClick={addDayBefore}
+                  style={{ background:"#eee", color:"#555", fontSize:11, padding:"4px 10px" }}>
+                  + Add day before
+                </button>
+                {contextBefore.length > 0 && (
+                  <span style={{ marginLeft:10, fontSize:10, color:"#999" }}>
+                    Earliest: {fmt(parseKey(contextBefore[0]))}
+                  </span>
+                )}
+              </div>
+
+              {/* Context before */}
+              <ContextSection
+                label="Before plan"
+                dates={contextBeforeDates}
+                dayLogs={dayLogs}
+                onDayChange={handleDayChange}
+                onRemoveDay={k => removeContextDay(k, "before")} />
+
               <div style={{ display:"grid", gridTemplateColumns:"170px 44px 90px 90px 90px 90px", padding:"5px 16px", fontSize:9, color:"#999", letterSpacing:1.5, textTransform:"uppercase", borderBottom:"1px solid #e0e0e0" }}>
                 <span>Week</span><span>Wk</span>
                 <span style={{ textAlign:"right" }}>Proj.&#8203;Start</span>
@@ -885,6 +1007,27 @@
                   </div>
                 );
               })}
+
+              {/* Context after */}
+              <ContextSection
+                label="After plan"
+                dates={contextAfterDates}
+                dayLogs={dayLogs}
+                onDayChange={handleDayChange}
+                onRemoveDay={k => removeContextDay(k, "after")} />
+
+              {/* + Add day after */}
+              <div style={{ marginTop:8 }}>
+                <button className="btn" onClick={addDayAfter}
+                  style={{ background:"#eee", color:"#555", fontSize:11, padding:"4px 10px" }}>
+                  + Add day after
+                </button>
+                {contextAfter.length > 0 && (
+                  <span style={{ marginLeft:10, fontSize:10, color:"#999" }}>
+                    Latest: {fmt(parseKey(contextAfter[contextAfter.length-1]))}
+                  </span>
+                )}
+              </div>
             </div>
             </div>{/* end left col */}
             <div style={{ width:352, flexShrink:0, position:"sticky", top:20 }}>
